@@ -2,12 +2,11 @@ import { Graphics } from 'pixi.js';
 
 /**
  * Pixel-art office furniture and room decoration module.
- * Draws RPG-style office rooms matching the pixel-art aesthetic.
- *
- * PX = base pixel unit (all coords are multiples of this for chunky look).
- * Zone size = 280x280. With PX=4, that's 70x70 art pixels.
+ * Each room's furniture reflects its function.
+ * PX = base pixel unit for chunky pixel art look.
  */
 const PX = 4;
+const P = (n: number) => n * PX;
 
 // ── Color Palette ──────────────────────────────────────────
 
@@ -18,7 +17,6 @@ const C = {
   wood: 0x7a5030,
   lightWood: 0x9a7048,
   paleWood: 0xb8884b,
-  warmWood: 0xa07040,
 
   // Floor
   woodFloor: 0x9a7040,
@@ -36,16 +34,17 @@ const C = {
   carpetDot: 0x5888b0,
   carpetEdge: 0x385878,
 
+  carpetWarm: 0xa06848,
+  carpetWarmAlt: 0x8a5838,
+  carpetWarmDot: 0xb07858,
+
   darkFloor: 0x282640,
   darkFloorAlt: 0x302e50,
   darkFloorLine: 0x222038,
 
-  // Walls
-  wallDark: 0x1a1e38,
-  wallMid: 0x222648,
-  wallLight: 0x2a2e50,
-  wallTrim: 0x3a3e60,
-  wallTop: 0x141830,
+  greenFloor: 0x3a6a3a,
+  greenFloorAlt: 0x4a7a4a,
+  greenFloorDot: 0x5a8a5a,
 
   // Screen / tech
   screenFrame: 0x2a2a38,
@@ -53,8 +52,12 @@ const C = {
   screenBlue: 0x6699cc,
   screenGlow: 0x88bbdd,
   screenDark: 0x445566,
+  screenGreen: 0x33aa55,
+  screenGreenGlow: 0x55cc77,
   led: 0x44dd44,
   ledOff: 0x224422,
+  ledRed: 0xdd4444,
+  ledBlue: 0x4488dd,
 
   // Books
   bookRed: 0xc04040,
@@ -118,13 +121,23 @@ const C = {
   portalMid: 0x6633aa,
   portalLight: 0x9955dd,
   portalGlow: 0xbb77ff,
+
+  // Whiteboard
+  whiteboardFrame: 0xbbbbcc,
+  whiteboardSurface: 0xf4f4f4,
+
+  // Sticky notes
+  stickyYellow: 0xf0e060,
+  stickyPink: 0xf090a0,
+  stickyGreen: 0x80d080,
+  stickyBlue: 0x80b0e0,
+  stickyOrange: 0xf0a050,
 };
 
-// Book color sequences for variety
 const BOOK_ROWS = [
-  [C.bookRed, C.bookGreen, C.bookBlue, C.bookYellow, C.bookPurple, C.bookOrange, C.bookBrown, C.bookCyan, C.bookPink, C.bookWhite, C.bookTan, C.bookNavy, C.bookDarkRed, C.bookDarkGreen],
-  [C.bookBlue, C.bookOrange, C.bookDarkGreen, C.bookPink, C.bookBrown, C.bookYellow, C.bookRed, C.bookWhite, C.bookNavy, C.bookCyan, C.bookTan, C.bookPurple, C.bookGreen, C.bookDarkRed],
-  [C.bookPurple, C.bookTan, C.bookCyan, C.bookDarkRed, C.bookGreen, C.bookNavy, C.bookOrange, C.bookBrown, C.bookBlue, C.bookPink, C.bookYellow, C.bookWhite, C.bookRed, C.bookDarkGreen],
+  [C.bookRed, C.bookGreen, C.bookBlue, C.bookYellow, C.bookPurple, C.bookOrange, C.bookBrown, C.bookCyan, C.bookPink, C.bookWhite, C.bookTan, C.bookNavy],
+  [C.bookBlue, C.bookOrange, C.bookDarkGreen, C.bookPink, C.bookBrown, C.bookYellow, C.bookRed, C.bookWhite, C.bookNavy, C.bookCyan, C.bookTan, C.bookPurple],
+  [C.bookPurple, C.bookTan, C.bookCyan, C.bookDarkRed, C.bookGreen, C.bookNavy, C.bookOrange, C.bookBrown, C.bookBlue, C.bookPink, C.bookYellow, C.bookWhite],
 ];
 
 // ── Drawing Helpers ─────────────────────────────────────────
@@ -133,27 +146,16 @@ function px(g: Graphics, x: number, y: number, w: number, h: number, color: numb
   g.rect(x, y, w, h).fill(color);
 }
 
-function P(n: number): number { return n * PX; }
-
 // ── Floor Patterns ──────────────────────────────────────────
 
-export function drawWoodFloor(g: Graphics, x: number, y: number, w: number, h: number): void {
-  // Base
+function drawWoodFloor(g: Graphics, x: number, y: number, w: number, h: number): void {
   px(g, x, y, w, h, C.woodFloor);
-
-  // Wide planks with alternating shade
   const plankH = P(4);
   let row = 0;
   for (let py = 0; py < h; py += plankH) {
     const ph = Math.min(plankH, h - py);
-    // Alternating plank color
-    if (row % 2 === 1) {
-      px(g, x, y + py, w, ph, C.woodFloorAlt);
-    }
-    // Plank seam line at top
+    if (row % 2 === 1) px(g, x, y + py, w, ph, C.woodFloorAlt);
     px(g, x, y + py, w, 1, C.plankLine);
-
-    // Vertical joints (offset per row)
     const offset = (row % 2) * P(7);
     for (let px2 = offset; px2 < w; px2 += P(14)) {
       px(g, x + px2, y + py, 1, ph, C.woodFloorDark);
@@ -162,91 +164,85 @@ export function drawWoodFloor(g: Graphics, x: number, y: number, w: number, h: n
   }
 }
 
-export function drawTileFloor(g: Graphics, x: number, y: number, w: number, h: number): void {
+function drawTileFloor(g: Graphics, x: number, y: number, w: number, h: number): void {
   px(g, x, y, w, h, C.tileBase);
   const tileSize = P(6);
   for (let ty = 0; ty < h; ty += tileSize) {
     for (let tx = 0; tx < w; tx += tileSize) {
       const odd = ((tx / tileSize + ty / tileSize) % 2) === 0;
       if (odd) px(g, x + tx, y + ty, tileSize, tileSize, C.tileAlt);
-      // Grid lines
       px(g, x + tx, y + ty, tileSize, 1, C.tileGrid);
       px(g, x + tx, y + ty, 1, tileSize, C.tileGrid);
-      // Diamond accent on alternate tiles
       if (!odd) {
-        const cx = x + tx + tileSize / 2 - 1;
-        const cy = y + ty + tileSize / 2 - 1;
-        px(g, cx, cy, 2, 2, C.tileDiamond);
+        px(g, x + tx + tileSize / 2 - 1, y + ty + tileSize / 2 - 1, 2, 2, C.tileDiamond);
       }
     }
   }
 }
 
-export function drawCarpetFloor(g: Graphics, x: number, y: number, w: number, h: number): void {
+function drawCarpetFloor(g: Graphics, x: number, y: number, w: number, h: number): void {
   px(g, x, y, w, h, C.carpet);
-  // Subtle woven texture
   for (let py = 0; py < h; py += P(2)) {
     for (let pxx = ((py / P(2)) % 2) * P(2); pxx < w; pxx += P(4)) {
       px(g, x + pxx, y + py, P(1), P(1), C.carpetDot);
     }
   }
-  // Edge border
   px(g, x, y, w, P(1), C.carpetEdge);
   px(g, x, y + h - P(1), w, P(1), C.carpetEdge);
   px(g, x, y, P(1), h, C.carpetEdge);
   px(g, x + w - P(1), y, P(1), h, C.carpetEdge);
 }
 
-export function drawDarkFloor(g: Graphics, x: number, y: number, w: number, h: number): void {
-  px(g, x, y, w, h, C.darkFloor);
-  for (let py = 0; py < h; py += P(3)) {
-    px(g, x, y + py, w, 1, C.darkFloorLine);
+function drawWarmCarpet(g: Graphics, x: number, y: number, w: number, h: number): void {
+  px(g, x, y, w, h, C.carpetWarm);
+  for (let py = 0; py < h; py += P(2)) {
+    for (let pxx = ((py / P(2)) % 2) * P(2); pxx < w; pxx += P(4)) {
+      px(g, x + pxx, y + py, P(1), P(1), C.carpetWarmDot);
+    }
   }
-  // Subtle alternating
-  for (let py = P(1); py < h; py += P(6)) {
-    px(g, x, y + py, w, P(3), C.darkFloorAlt);
-  }
+  px(g, x, y, w, P(1), C.carpetWarmAlt);
+  px(g, x, y + h - P(1), w, P(1), C.carpetWarmAlt);
+  px(g, x, y, P(1), h, C.carpetWarmAlt);
+  px(g, x + w - P(1), y, P(1), h, C.carpetWarmAlt);
 }
 
-// ── Wall Rendering ──────────────────────────────────────────
+function drawDarkFloor(g: Graphics, x: number, y: number, w: number, h: number): void {
+  px(g, x, y, w, h, C.darkFloor);
+  for (let py = 0; py < h; py += P(3)) px(g, x, y + py, w, 1, C.darkFloorLine);
+  for (let py = P(1); py < h; py += P(6)) px(g, x, y + py, w, P(3), C.darkFloorAlt);
+}
 
-/** Top wall with depth effect — tall dark section with trim */
-function drawTopWall(g: Graphics, x: number, y: number, w: number, h: number): void {
-  const wallH = P(5);
-  px(g, x, y, w, wallH, C.wallDark);
-  px(g, x, y, w, P(1), C.wallTop);
-  px(g, x, y + P(1), w, P(1), C.wallMid);
-  // Trim line at bottom of wall
-  px(g, x, y + wallH - P(1), w, P(1), C.wallTrim);
-  px(g, x, y + wallH, w, 1, C.wallLight);
+function drawGreenCarpet(g: Graphics, x: number, y: number, w: number, h: number): void {
+  px(g, x, y, w, h, C.greenFloor);
+  for (let py = 0; py < h; py += P(2)) {
+    for (let pxx = ((py / P(2)) % 2) * P(2); pxx < w; pxx += P(4)) {
+      px(g, x + pxx, y + py, P(1), P(1), C.greenFloorDot);
+    }
+  }
+  px(g, x, y, w, P(1), C.greenFloorAlt);
+  px(g, x, y + h - P(1), w, P(1), C.greenFloorAlt);
 }
 
 // ── Furniture Pieces ────────────────────────────────────────
 
-/** Wide bookshelf against wall — the signature piece */
-function drawWideShelf(g: Graphics, x: number, y: number): void {
-  const sw = P(16), sh = P(14);
-  // Back panel
+function drawBookshelf(g: Graphics, x: number, y: number, wide: boolean): void {
+  const sw = wide ? P(16) : P(10);
+  const sh = P(14);
   px(g, x, y, sw, sh, C.darkWood);
-  // Shelf frame sides
   px(g, x, y, P(1), sh, C.medWood);
   px(g, x + sw - P(1), y, P(1), sh, C.medWood);
-  // Interior
   px(g, x + P(1), y + P(1), sw - P(2), sh - P(2), C.wood);
-  // Top
   px(g, x, y, sw, P(1), C.lightWood);
-  // Three shelf dividers
   for (let i = 1; i <= 3; i++) {
     const sy = y + i * P(3) + P(1);
     px(g, x, sy, sw, P(1), C.medWood);
     px(g, x + P(1), sy, sw - P(2), 1, C.lightWood);
   }
-  // Books on each shelf (3 shelves)
   for (let shelf = 0; shelf < 3; shelf++) {
     const shelfBottom = y + (shelf + 1) * P(3) + P(1);
     const colors = BOOK_ROWS[shelf % BOOK_ROWS.length];
     let bx = x + P(1) + 1;
-    let ci = shelf * 3; // offset color start
+    let ci = shelf * 3;
     while (bx < x + sw - P(2)) {
       const bw = PX - 1;
       const bh = P(2) + ((ci * 3 + shelf) % 3);
@@ -255,372 +251,272 @@ function drawWideShelf(g: Graphics, x: number, y: number): void {
       ci++;
     }
   }
-  // Bottom shelf/base
   px(g, x, y + sh - P(1), sw, P(1), C.medWood);
 }
 
-/** Narrow bookshelf */
-function drawNarrowShelf(g: Graphics, x: number, y: number): void {
-  const sw = P(10), sh = P(14);
-  px(g, x, y, sw, sh, C.darkWood);
-  px(g, x, y, P(1), sh, C.medWood);
-  px(g, x + sw - P(1), y, P(1), sh, C.medWood);
-  px(g, x + P(1), y + P(1), sw - P(2), sh - P(2), C.wood);
-  px(g, x, y, sw, P(1), C.lightWood);
-
-  for (let i = 1; i <= 3; i++) {
-    const sy = y + i * P(3) + P(1);
-    px(g, x, sy, sw, P(1), C.medWood);
-    px(g, x + P(1), sy, sw - P(2), 1, C.lightWood);
-  }
-
-  for (let shelf = 0; shelf < 3; shelf++) {
-    const shelfBottom = y + (shelf + 1) * P(3) + P(1);
-    const colors = BOOK_ROWS[(shelf + 1) % BOOK_ROWS.length];
-    let bx = x + P(1) + 1;
-    let ci = shelf * 5;
-    while (bx < x + sw - P(2)) {
-      const bw = PX - 1;
-      const bh = P(2) + ((ci * 2 + shelf) % 3);
-      px(g, bx, shelfBottom - bh, bw, bh, colors[ci % colors.length]);
-      bx += bw + 1;
-      ci++;
-    }
-  }
-  px(g, x, y + sh - P(1), sw, P(1), C.medWood);
-}
-
-/** Desk with monitor — agent faces down toward it */
 function drawDeskWithMonitor(g: Graphics, x: number, y: number): void {
   const dw = P(14), dh = P(7);
-  // Desktop surface
   px(g, x, y, dw, dh, C.medWood);
   px(g, x + P(1), y + P(1), dw - P(2), dh - P(2), C.wood);
-  // Wood grain highlight
   px(g, x + P(1), y + P(1), dw - P(2), 1, C.lightWood);
-  // Front panel
   px(g, x, y + dh, dw, P(2), C.medWood);
   px(g, x + P(1), y + dh, dw - P(2), P(1), C.darkWood);
-  // Legs visible at sides
-  px(g, x, y + dh + P(1), P(1), P(2), C.darkWood);
-  px(g, x + dw - P(1), y + dh + P(1), P(1), P(2), C.darkWood);
-
-  // Monitor
   const mx = x + P(4), my = y;
   px(g, mx, my, P(6), P(5), C.screenFrame);
   px(g, mx + P(1), my + P(1), P(4), P(3), C.screenBlue);
-  // Screen glare
   px(g, mx + P(1), my + P(1), P(2), P(1), C.screenGlow);
-  // Stand
   px(g, mx + P(2), my + P(5), P(2), P(1), C.screenBody);
-  // Keyboard
   px(g, x + P(3), y + P(5), P(5), P(1), C.metalDark);
 }
 
-/** Laptop desk — smaller, no big monitor */
-function drawLaptopDesk(g: Graphics, x: number, y: number): void {
-  const dw = P(12), dh = P(6);
-  px(g, x, y, dw, dh, C.medWood);
-  px(g, x + P(1), y + P(1), dw - P(2), dh - P(2), C.wood);
-  px(g, x + P(1), y + P(1), dw - P(2), 1, C.lightWood);
-  px(g, x, y + dh, dw, P(2), C.medWood);
-  px(g, x + P(1), y + dh, dw - P(2), P(1), C.darkWood);
-
-  // Laptop
-  const lx = x + P(3), ly = y + P(1);
-  px(g, lx, ly, P(6), P(4), C.metalDark);
-  px(g, lx + P(1), ly + P(1), P(4), P(2), C.screenBlue);
-  px(g, lx + P(1), ly + P(1), P(2), P(1), C.screenGlow);
+function drawServerMonitor(g: Graphics, x: number, y: number): void {
+  const dw = P(14), dh = P(7);
+  px(g, x, y, dw, dh, C.metalDark);
+  px(g, x + P(1), y + P(1), dw - P(2), dh - P(2), C.metalFrame);
+  const mx = x + P(3), my = y;
+  px(g, mx, my, P(8), P(5), C.screenFrame);
+  px(g, mx + P(1), my + P(1), P(6), P(3), C.screenGreen);
+  px(g, mx + P(1), my + P(1), P(3), P(1), C.screenGreenGlow);
+  // Terminal text lines
+  px(g, mx + P(2), my + P(2), P(4), 1, C.screenGreenGlow);
+  px(g, mx + P(2), my + P(3), P(3), 1, C.screenGreenGlow);
+  px(g, mx + P(3), my + P(5), P(2), P(1), C.metalDark);
+  px(g, x + P(2), y + P(5), P(6), P(1), C.metalFrame);
 }
 
-/** Office chair — top-down view */
 function drawChair(g: Graphics, x: number, y: number): void {
-  // Back
   px(g, x + P(1), y, P(3), P(1), C.chairBack);
-  // Seat
   px(g, x, y + P(1), P(5), P(4), C.chairSeat);
   px(g, x + P(1), y + P(1), P(3), P(3), C.chairBack);
-  // Armrests
   px(g, x, y + P(1), P(1), P(3), C.chairArm);
   px(g, x + P(4), y + P(1), P(1), P(3), C.chairArm);
 }
 
-/** Large plant in pot */
 function drawPlantLarge(g: Graphics, x: number, y: number): void {
-  // Pot
   px(g, x + P(1), y + P(5), P(4), P(3), C.potBase);
   px(g, x + P(2), y + P(5), P(2), P(1), C.potRim);
   px(g, x + P(2), y + P(7), P(2), P(1), C.potDark);
-  // Soil
   px(g, x + P(1), y + P(4), P(4), P(1), C.soil);
-  // Leaves — bushy
   px(g, x + P(2), y, P(2), P(5), C.leaf);
   px(g, x + P(1), y + P(1), P(1), P(3), C.leafDark);
   px(g, x + P(4), y + P(1), P(1), P(3), C.leafLight);
   px(g, x, y + P(2), P(1), P(2), C.leafDark);
   px(g, x + P(5), y + P(2), P(1), P(2), C.leafBright);
   px(g, x + P(2), y - P(1), P(2), P(1), C.leafLight);
-  px(g, x + P(1), y, P(1), P(1), C.leaf);
-  px(g, x + P(4), y, P(1), P(1), C.leafBright);
 }
 
-/** Small desk plant */
 function drawPlantSmall(g: Graphics, x: number, y: number): void {
-  // Pot
   px(g, x, y + P(3), P(3), P(2), C.potBase);
   px(g, x, y + P(4), P(3), P(1), C.potDark);
-  // Leaves
   px(g, x + P(1), y, P(1), P(3), C.leaf);
   px(g, x, y + P(1), P(1), P(1), C.leafDark);
   px(g, x + P(2), y + P(1), P(1), P(1), C.leafLight);
 }
 
-/** Vending machine — tall with product display */
-function drawVendingMachine(g: Graphics, x: number, y: number): void {
-  const vw = P(8), vh = P(16);
-  px(g, x, y, vw, vh, C.vendingBody);
-  // Top
-  px(g, x, y, vw, P(1), C.metalDark);
-  // Glass front
-  px(g, x + P(1), y + P(2), vw - P(2), P(9), C.vendingGlass);
-  // Products (rows of colored items)
-  const pColors = [C.bookRed, C.bookOrange, C.bookGreen, C.bookBlue, C.bookYellow];
-  for (let row = 0; row < 4; row++) {
-    for (let col = 0; col < 3; col++) {
-      px(g, x + P(2) + col * P(2), y + P(3) + row * P(2), P(1), P(1), pColors[(row + col) % pColors.length]);
-    }
-    // Shelf line
-    px(g, x + P(1), y + P(4) + row * P(2), vw - P(2), 1, C.metalDark);
+function drawServerRack(g: Graphics, x: number, y: number): void {
+  const rw = P(7), rh = P(14);
+  px(g, x, y, rw, rh, C.metalFrame);
+  px(g, x, y, rw, P(1), C.metalDark);
+  for (let i = 0; i < 4; i++) {
+    const sy = y + P(1) + i * P(3);
+    px(g, x + P(1), sy, rw - P(2), P(2), C.metalDark);
+    px(g, x + P(1), sy, rw - P(2), P(1), C.metalMid);
+    px(g, x + P(2), sy + P(1), P(1), P(1), i < 3 ? C.led : C.ledOff);
+    px(g, x + rw - P(3), sy + P(1), P(1), P(1), C.led);
+    px(g, x + P(3), sy + P(1), P(1), P(1), C.black);
   }
-  // Dispensing slot
-  px(g, x + P(1), y + P(12), vw - P(2), P(3), C.black);
-  px(g, x + P(2), y + P(12), vw - P(4), P(1), C.metalDark);
-  // Button panel
-  px(g, x + vw - P(2), y + P(3), P(1), P(6), C.metalDark);
-  px(g, x + vw - P(2), y + P(4), P(1), P(1), C.red);
-  px(g, x + vw - P(2), y + P(6), P(1), P(1), C.green);
+  px(g, x, y + rh - P(1), rw, P(1), C.metalFrame);
 }
 
-/** Fridge */
-function drawFridge(g: Graphics, x: number, y: number): void {
-  const fw = P(6), fh = P(14);
-  px(g, x, y, fw, fh, C.fridgeBody);
-  px(g, x + P(1), y + P(1), fw - P(2), fh - P(2), C.fridgeLight);
-  // Door divider
-  px(g, x + P(1), y + P(6), fw - P(2), P(1), C.fridgeDark);
-  // Handles
-  px(g, x + fw - P(2), y + P(3), P(1), P(2), C.metalMid);
-  px(g, x + fw - P(2), y + P(8), P(1), P(2), C.metalMid);
-  // Top surface
-  px(g, x, y, fw, P(1), C.metalLight);
-  // Shadow at base
-  px(g, x, y + fh - P(1), fw, P(1), C.fridgeDark);
-}
-
-/** Wall clock */
-function drawClock(g: Graphics, x: number, y: number): void {
-  // Round-ish frame
-  px(g, x + P(1), y, P(4), P(1), C.offWhite);
-  px(g, x, y + P(1), P(6), P(4), C.white);
-  px(g, x + P(1), y + P(5), P(4), P(1), C.offWhite);
-  // Inner face
-  px(g, x + P(1), y + P(1), P(4), P(4), C.cream);
-  // Hour marks
-  px(g, x + P(3), y + P(1), P(1), P(1), C.black); // 12
-  px(g, x + P(4), y + P(3), P(1), P(1), C.black); // 3
-  px(g, x + P(3), y + P(4), P(1), P(1), C.black); // 6
-  px(g, x + P(1), y + P(3), P(1), P(1), C.black); // 9
-  // Hands
-  px(g, x + P(3), y + P(2), P(1), P(2), C.black);
-  px(g, x + P(3), y + P(3), P(1), P(1), C.red);
-}
-
-/** Painting with landscape */
-function drawPainting(g: Graphics, x: number, y: number): void {
-  const pw = P(10), ph = P(7);
-  // Frame
-  px(g, x, y, pw, ph, C.paleWood);
-  px(g, x, y, pw, P(1), C.lightWood);
-  // Canvas
-  px(g, x + P(1), y + P(1), pw - P(2), ph - P(2), 0x6699cc);
-  // Mountains
-  px(g, x + P(1), y + P(3), P(3), P(2), C.leafDark);
-  px(g, x + P(2), y + P(2), P(2), P(1), C.leaf);
-  // Ground
-  px(g, x + P(1), y + ph - P(2), pw - P(2), P(1), C.leafDark);
-  // Sun
-  px(g, x + pw - P(3), y + P(1), P(2), P(2), C.yellow);
-  // Clouds
-  px(g, x + P(4), y + P(2), P(3), P(1), C.white);
-}
-
-/** Filing cabinet */
 function drawFileCabinet(g: Graphics, x: number, y: number): void {
   const fw = P(5), fh = P(10);
   px(g, x, y, fw, fh, C.metalDark);
   px(g, x + P(1), y + P(1), fw - P(2), P(3), C.metalMid);
   px(g, x + P(1), y + P(5), fw - P(2), P(3), C.metalMid);
-  // Handles
   px(g, x + P(2), y + P(2), P(1), P(1), C.metalFrame);
   px(g, x + P(2), y + P(6), P(1), P(1), C.metalFrame);
-  // Labels
   px(g, x + P(1), y + P(1), P(2), P(1), C.paper);
   px(g, x + P(1), y + P(5), P(2), P(1), C.paper);
-  // Base
   px(g, x, y + fh - P(1), fw, P(1), C.metalFrame);
 }
 
-/** Sofa / couch */
-function drawSofa(g: Graphics, x: number, y: number): void {
-  const sw = P(16), sh = P(8);
-  // Back
-  px(g, x, y, sw, P(3), C.couchFrame);
-  px(g, x + P(1), y + P(1), sw - P(2), P(1), C.couchHighlight);
-  // Seat
-  px(g, x, y + P(3), sw, sh - P(3), C.couchSeat);
-  // Cushions
-  px(g, x + P(1), y + P(3), P(6), P(4), C.couchCushion);
-  px(g, x + P(1), y + P(3), P(6), P(1), C.couchHighlight);
-  px(g, x + P(9), y + P(3), P(6), P(4), C.couchCushion);
-  px(g, x + P(9), y + P(3), P(6), P(1), C.couchHighlight);
-  // Armrests
-  px(g, x, y, P(1), sh, C.couchFrame);
-  px(g, x + sw - P(1), y, P(1), sh, C.couchFrame);
+function drawConferenceTable(g: Graphics, x: number, y: number, w: number, h: number): void {
+  px(g, x + P(1), y + P(1), w, h, C.darkWood);
+  px(g, x, y, w, h, C.medWood);
+  px(g, x + P(1), y + P(1), w - P(2), h - P(2), C.wood);
+  px(g, x + P(2), y + P(2), w - P(4), P(1), C.lightWood);
+  px(g, x + P(2), y + P(4), w - P(4), 1, C.lightWood);
 }
 
-/** Small table / coffee table */
-function drawSmallTable(g: Graphics, x: number, y: number): void {
-  const tw = P(10), th = P(5);
-  px(g, x, y, tw, th, C.medWood);
-  px(g, x + P(1), y + P(1), tw - P(2), th - P(2), C.wood);
-  px(g, x + P(1), y + P(1), tw - P(2), 1, C.lightWood);
-  // Legs
-  px(g, x + P(1), y + th, P(1), P(2), C.darkWood);
-  px(g, x + tw - P(2), y + th, P(1), P(2), C.darkWood);
-}
-
-/** Conference table (large, oval-ish) */
-function drawConferenceTable(g: Graphics, x: number, y: number): void {
-  const tw = P(18), th = P(10);
+function drawRoundTable(g: Graphics, cx: number, cy: number, r: number): void {
   // Shadow
-  px(g, x + P(1), y + P(1), tw, th, C.darkWood);
-  // Surface
-  px(g, x, y, tw, th, C.medWood);
-  px(g, x + P(1), y + P(1), tw - P(2), th - P(2), C.wood);
+  px(g, cx - r / 2 + 3, cy - r / 2 + 3, r, r, C.darkWood);
+  // Pixel-art circle approximation: concentric rings getting wider
+  const half = r / 2;
+  // Outermost ring (edge)
+  px(g, cx - half + P(2), cy - half, r - P(4), P(1), C.medWood);
+  px(g, cx - half + P(2), cy + half - P(1), r - P(4), P(1), C.medWood);
+  px(g, cx - half, cy - half + P(2), P(1), r - P(4), C.medWood);
+  px(g, cx + half - P(1), cy - half + P(2), P(1), r - P(4), C.medWood);
+  // Second ring
+  px(g, cx - half + P(1), cy - half + P(1), r - P(2), P(1), C.medWood);
+  px(g, cx - half + P(1), cy + half - P(2), r - P(2), P(1), C.medWood);
+  px(g, cx - half + P(1), cy - half + P(1), P(1), r - P(2), C.medWood);
+  px(g, cx + half - P(2), cy - half + P(1), P(1), r - P(2), C.medWood);
+  // Fill center
+  px(g, cx - half + P(2), cy - half + P(1), r - P(4), r - P(2), C.wood);
+  px(g, cx - half + P(1), cy - half + P(2), r - P(2), r - P(4), C.wood);
   // Woodgrain shine
-  px(g, x + P(2), y + P(2), tw - P(4), P(1), C.lightWood);
-  px(g, x + P(2), y + P(4), tw - P(4), 1, C.lightWood);
-  // Papers on table
-  px(g, x + P(3), y + P(3), P(3), P(4), C.paper);
-  px(g, x + P(3), y + P(3), P(2), P(1), C.metalDark);
-  px(g, x + P(12), y + P(5), P(2), P(3), C.paper);
+  px(g, cx - P(3), cy - P(2), P(5), P(1), C.lightWood);
+  px(g, cx - P(2), cy, P(4), 1, C.lightWood);
 }
 
-/** Whiteboard on wall */
-function drawWhiteboard(g: Graphics, x: number, y: number, wide?: boolean): void {
-  const ww = wide ? P(20) : P(14);
-  const wh = P(10);
-  // Frame
-  px(g, x, y, ww, wh, C.metalLight);
-  // Board
-  px(g, x + P(1), y + P(1), ww - P(2), wh - P(2), C.white);
-  // Writing
-  px(g, x + P(2), y + P(2), P(5), P(1), C.blue);
-  px(g, x + P(2), y + P(4), P(7), P(1), C.red);
-  px(g, x + P(2), y + P(6), P(4), P(1), C.black);
-  if (wide) {
-    px(g, x + P(12), y + P(2), P(4), P(1), C.green);
-    px(g, x + P(12), y + P(4), P(6), P(1), C.blue);
-    px(g, x + P(12), y + P(6), P(3), P(1), C.red);
-    // Checkbox items
-    for (let i = 0; i < 3; i++) {
-      px(g, x + P(12), y + P(2) + i * P(2), P(1), P(1), C.metalDark);
-    }
+function drawWhiteboard(g: Graphics, x: number, y: number, w: number, h: number): void {
+  px(g, x, y, w, h, C.whiteboardFrame);
+  px(g, x + P(1), y + P(1), w - P(2), h - P(2), C.whiteboardSurface);
+  // Content
+  px(g, x + P(2), y + P(2), w * 0.4, P(1), C.blue);
+  px(g, x + P(2), y + P(4), w * 0.6, P(1), C.red);
+  px(g, x + P(2), y + P(6), w * 0.3, P(1), C.black);
+  if (w > P(16)) {
+    px(g, x + w / 2, y + P(2), w * 0.3, P(1), C.green);
+    px(g, x + w / 2, y + P(4), w * 0.2, P(1), C.blue);
   }
   // Marker tray
-  px(g, x + P(2), y + wh, ww - P(4), P(1), C.metalDark);
-  // Markers on tray
-  px(g, x + P(3), y + wh, P(1), P(1), C.red);
-  px(g, x + P(5), y + wh, P(1), P(1), C.blue);
-  px(g, x + P(7), y + wh, P(1), P(1), C.black);
+  px(g, x + P(2), y + h, w - P(4), P(1), C.metalDark);
+  px(g, x + P(3), y + h, P(1), P(1), C.red);
+  px(g, x + P(5), y + h, P(1), P(1), C.blue);
 }
 
-/** Server rack */
-function drawServerRack(g: Graphics, x: number, y: number): void {
-  const rw = P(7), rh = P(14);
-  px(g, x, y, rw, rh, C.metalFrame);
-  px(g, x, y, rw, P(1), C.metalDark);
-  // Server units (4 servers)
-  for (let i = 0; i < 4; i++) {
-    const sy = y + P(1) + i * P(3);
-    px(g, x + P(1), sy, rw - P(2), P(2), C.metalDark);
-    // Front panel
-    px(g, x + P(1), sy, rw - P(2), P(1), C.metalMid);
-    // LEDs
-    px(g, x + P(2), sy + P(1), P(1), P(1), i < 3 ? C.led : C.ledOff);
-    px(g, x + rw - P(3), sy + P(1), P(1), P(1), C.led);
-    // Vent holes
-    px(g, x + P(3), sy + P(1), P(1), P(1), C.black);
+function drawStickyNote(g: Graphics, x: number, y: number, color: number): void {
+  px(g, x, y, P(3), P(3), color);
+  px(g, x, y, P(3), 1, 0x000000);
+  px(g, x + P(1), y + P(1), P(1), 1, C.metalDark);
+}
+
+function drawSofa(g: Graphics, x: number, y: number, w: number): void {
+  px(g, x, y, w, P(3), C.couchFrame);
+  px(g, x + P(1), y + P(1), w - P(2), P(1), C.couchHighlight);
+  px(g, x, y + P(3), w, P(5), C.couchSeat);
+  // Cushions
+  const cushW = Math.floor((w - P(3)) / 2);
+  px(g, x + P(1), y + P(3), cushW, P(4), C.couchCushion);
+  px(g, x + P(1), y + P(3), cushW, P(1), C.couchHighlight);
+  px(g, x + P(2) + cushW, y + P(3), cushW, P(4), C.couchCushion);
+  px(g, x + P(2) + cushW, y + P(3), cushW, P(1), C.couchHighlight);
+  px(g, x, y, P(1), P(8), C.couchFrame);
+  px(g, x + w - P(1), y, P(1), P(8), C.couchFrame);
+}
+
+function drawSmallTable(g: Graphics, x: number, y: number, w: number, h: number): void {
+  px(g, x, y, w, h, C.medWood);
+  px(g, x + P(1), y + P(1), w - P(2), h - P(2), C.wood);
+  px(g, x + P(1), y + P(1), w - P(2), 1, C.lightWood);
+}
+
+function drawVendingMachine(g: Graphics, x: number, y: number): void {
+  const vw = P(8), vh = P(16);
+  px(g, x, y, vw, vh, C.vendingBody);
+  px(g, x, y, vw, P(1), C.metalDark);
+  px(g, x + P(1), y + P(2), vw - P(2), P(9), C.vendingGlass);
+  const pColors = [C.bookRed, C.bookOrange, C.bookGreen, C.bookBlue, C.bookYellow];
+  for (let row = 0; row < 4; row++) {
+    for (let col = 0; col < 3; col++) {
+      px(g, x + P(2) + col * P(2), y + P(3) + row * P(2), P(1), P(1), pColors[(row + col) % pColors.length]);
+    }
+    px(g, x + P(1), y + P(4) + row * P(2), vw - P(2), 1, C.metalDark);
   }
-  // Base
-  px(g, x, y + rh - P(1), rw, P(1), C.metalFrame);
+  px(g, x + P(1), y + P(12), vw - P(2), P(3), C.black);
+  px(g, x + vw - P(2), y + P(4), P(1), P(1), C.red);
+  px(g, x + vw - P(2), y + P(6), P(1), P(1), C.green);
 }
 
-/** Coffee machine on counter */
+function drawFridge(g: Graphics, x: number, y: number): void {
+  const fw = P(6), fh = P(14);
+  px(g, x, y, fw, fh, C.fridgeBody);
+  px(g, x + P(1), y + P(1), fw - P(2), fh - P(2), C.fridgeLight);
+  px(g, x + P(1), y + P(6), fw - P(2), P(1), C.fridgeDark);
+  px(g, x + fw - P(2), y + P(3), P(1), P(2), C.metalMid);
+  px(g, x + fw - P(2), y + P(8), P(1), P(2), C.metalMid);
+  px(g, x, y, fw, P(1), C.metalLight);
+  px(g, x, y + fh - P(1), fw, P(1), C.fridgeDark);
+}
+
 function drawCoffeeMachine(g: Graphics, x: number, y: number): void {
   px(g, x, y, P(4), P(6), C.metalDark);
   px(g, x + P(1), y, P(2), P(1), C.metalBright);
   px(g, x + P(1), y + P(3), P(2), P(1), C.red);
   px(g, x, y + P(5), P(4), P(1), C.metalFrame);
-  // Cup
   px(g, x + P(1), y + P(4), P(2), P(2), C.white);
 }
 
-/** Water cooler */
 function drawWaterCooler(g: Graphics, x: number, y: number): void {
-  // Bottle
   px(g, x + P(1), y, P(2), P(3), C.screenBlue);
   px(g, x + P(1), y, P(2), P(1), C.screenGlow);
-  // Body
   px(g, x, y + P(3), P(4), P(5), C.metalLight);
-  px(g, x + P(1), y + P(3), P(2), P(1), C.metalBright);
-  // Taps
   px(g, x + P(1), y + P(5), P(1), P(1), C.blue);
   px(g, x + P(2), y + P(5), P(1), P(1), C.red);
-  // Base
   px(g, x, y + P(7), P(4), P(1), C.metalDark);
 }
 
-/** Kitchen counter */
 function drawCounter(g: Graphics, x: number, y: number, w: number): void {
   px(g, x, y, w, P(5), C.medWood);
   px(g, x + P(1), y + P(1), w - P(2), P(3), C.lightWood);
   px(g, x, y, w, P(1), C.paleWood);
-  // Cabinet doors below
   px(g, x, y + P(5), w, P(4), C.medWood);
   const doorW = P(4);
   for (let dx = 0; dx < w - P(1); dx += doorW + 2) {
     px(g, x + dx + 1, y + P(6), doorW, P(2), C.wood);
-    px(g, x + dx + P(2), y + P(7), P(1), P(1), C.darkWood); // handle
+    px(g, x + dx + P(2), y + P(7), P(1), P(1), C.darkWood);
   }
 }
 
-/** Sticky note */
-function drawStickyNote(g: Graphics, x: number, y: number, color: number): void {
-  px(g, x, y, P(3), P(3), color);
-  px(g, x, y, P(3), 1, 0x000000); // top shadow
-  // Text line
-  px(g, x + P(1), y + P(1), P(1), 1, C.metalDark);
+function drawPainting(g: Graphics, x: number, y: number, w: number, h: number): void {
+  px(g, x, y, w, h, C.paleWood);
+  px(g, x + P(1), y + P(1), w - P(2), h - P(2), 0x6699cc);
+  // Mountains
+  px(g, x + P(1), y + h - P(4), P(3), P(2), C.leafDark);
+  px(g, x + P(2), y + h - P(5), P(2), P(1), C.leaf);
+  // Ground
+  px(g, x + P(1), y + h - P(2), w - P(2), P(1), C.leafDark);
+  // Sun
+  px(g, x + w - P(3), y + P(1), P(2), P(2), C.yellow);
 }
 
-/** Portal effect */
+function drawClock(g: Graphics, x: number, y: number): void {
+  px(g, x + P(1), y, P(4), P(1), C.offWhite);
+  px(g, x, y + P(1), P(6), P(4), C.white);
+  px(g, x + P(1), y + P(5), P(4), P(1), C.offWhite);
+  px(g, x + P(1), y + P(1), P(4), P(4), C.cream);
+  px(g, x + P(3), y + P(1), P(1), P(1), C.black);
+  px(g, x + P(4), y + P(3), P(1), P(1), C.black);
+  px(g, x + P(3), y + P(4), P(1), P(1), C.black);
+  px(g, x + P(1), y + P(3), P(1), P(1), C.black);
+  px(g, x + P(3), y + P(2), P(1), P(2), C.black);
+  px(g, x + P(3), y + P(3), P(1), P(1), C.red);
+}
+
+function drawCoffeeCup(g: Graphics, x: number, y: number): void {
+  px(g, x, y, P(2), P(2), C.white);
+  px(g, x + P(2), y + P(1), P(1), P(1), C.offWhite);
+}
+
+function drawPapers(g: Graphics, x: number, y: number): void {
+  px(g, x + 2, y + 2, P(3), P(4), C.offWhite);
+  px(g, x, y, P(3), P(4), C.paper);
+  px(g, x + PX, y + PX, P(1), 1, C.metalDark);
+  px(g, x + PX, y + P(2), P(2), 1, C.metalDark);
+}
+
+function drawBox(g: Graphics, x: number, y: number, color: number): void {
+  px(g, x, y, P(4), P(3), color);
+  px(g, x, y, P(4), P(1), C.paleWood);
+  px(g, x + P(1), y + P(1), P(2), P(1), C.darkWood);
+}
+
 function drawPortalEffect(g: Graphics, cx: number, cy: number): void {
-  const r = P(8);
-  // Outer glow
   px(g, cx - P(6), cy - P(1), P(12), P(2), C.portalDeep);
   px(g, cx - P(1), cy - P(6), P(2), P(12), C.portalDeep);
-
-  // Ring segments (approximate circle)
   px(g, cx - P(4), cy - P(5), P(8), P(1), C.portalMid);
   px(g, cx - P(5), cy - P(4), P(10), P(1), C.portalLight);
   px(g, cx - P(6), cy - P(3), P(1), P(6), C.portalMid);
@@ -629,310 +525,392 @@ function drawPortalEffect(g: Graphics, cx: number, cy: number): void {
   px(g, cx + P(4), cy - P(3), P(1), P(6), C.portalLight);
   px(g, cx - P(5), cy + P(3), P(10), P(1), C.portalLight);
   px(g, cx - P(4), cy + P(4), P(8), P(1), C.portalMid);
-
-  // Inner area
   px(g, cx - P(3), cy - P(3), P(6), P(6), C.portalDeep);
   px(g, cx - P(2), cy - P(2), P(4), P(4), C.portalMid);
-  // Center glow
   px(g, cx - P(1), cy - P(1), P(2), P(2), C.portalGlow);
-  // Sparkle effect
   px(g, cx - P(3), cy, P(1), P(1), C.portalGlow);
   px(g, cx + P(2), cy - P(1), P(1), P(1), C.portalGlow);
   px(g, cx, cy + P(2), P(1), P(1), C.portalGlow);
-  px(g, cx - P(1), cy - P(3), P(1), P(1), C.portalGlow);
 }
 
-/** Coffee cup */
-function drawCoffeeCup(g: Graphics, x: number, y: number): void {
-  px(g, x, y, P(2), P(2), C.white);
-  px(g, x + P(2), y + P(1), P(1), P(1), C.offWhite); // handle
-  px(g, x, y, P(2), 1, C.cream);
+function drawLaptopDesk(g: Graphics, x: number, y: number): void {
+  const dw = P(12), dh = P(6);
+  px(g, x, y, dw, dh, C.medWood);
+  px(g, x + P(1), y + P(1), dw - P(2), dh - P(2), C.wood);
+  px(g, x + P(1), y + P(1), dw - P(2), 1, C.lightWood);
+  px(g, x, y + dh, dw, P(2), C.medWood);
+  const lx = x + P(3), ly = y + P(1);
+  px(g, lx, ly, P(6), P(4), C.metalDark);
+  px(g, lx + P(1), ly + P(1), P(4), P(2), C.screenBlue);
+  px(g, lx + P(1), ly + P(1), P(2), P(1), C.screenGlow);
 }
 
-/** Papers on desk */
-function drawPapers(g: Graphics, x: number, y: number): void {
-  px(g, x + 2, y + 2, P(3), P(4), C.offWhite);
-  px(g, x, y, P(3), P(4), C.paper);
-  px(g, x + PX, y + PX, P(1), 1, C.metalDark);
-  px(g, x + PX, y + P(2), P(2), 1, C.metalDark);
+// Kanban board (vertical board with colored cards)
+function drawKanbanBoard(g: Graphics, x: number, y: number, w: number, h: number): void {
+  px(g, x, y, w, h, C.whiteboardFrame);
+  px(g, x + P(1), y + P(1), w - P(2), h - P(2), C.whiteboardSurface);
+  // 3 columns
+  const colW = Math.floor((w - P(4)) / 3);
+  const headers = [C.bookRed, C.bookYellow, C.bookGreen];
+  const labels = ['TODO', 'WIP', 'DONE'];
+  for (let i = 0; i < 3; i++) {
+    const cx = x + P(2) + i * (colW + P(1));
+    // Column header
+    px(g, cx, y + P(2), colW, P(2), headers[i]);
+    // Cards
+    const cardColors = [C.stickyYellow, C.stickyBlue, C.stickyPink, C.stickyGreen];
+    const numCards = i === 0 ? 3 : i === 1 ? 2 : 1;
+    for (let j = 0; j < numCards; j++) {
+      px(g, cx + 2, y + P(5) + j * P(3), colW - 4, P(2), cardColors[(i + j) % cardColors.length]);
+      px(g, cx + P(1), y + P(5) + j * P(3) + 2, colW - P(3), 1, C.metalDark);
+    }
+  }
 }
 
-/** Boxes (for storage rooms) */
-function drawBox(g: Graphics, x: number, y: number, color: number): void {
-  px(g, x, y, P(4), P(3), color);
-  px(g, x, y, P(4), P(1), C.paleWood);
-  px(g, x + P(1), y + P(1), P(2), P(1), C.darkWood); // tape
+// Network/globe decoration
+function drawGlobeScreen(g: Graphics, x: number, y: number): void {
+  const sw = P(20), sh = P(14);
+  px(g, x, y, sw, sh, C.screenFrame);
+  px(g, x + P(1), y + P(1), sw - P(2), sh - P(2), C.screenDark);
+  px(g, x + P(2), y + P(2), sw - P(4), sh - P(4), C.screenBlue);
+  // Globe-like circle
+  const cx = x + sw / 2, cy = y + sh / 2;
+  px(g, cx - P(3), cy - P(2), P(6), P(4), 0x2277aa);
+  px(g, cx - P(2), cy - P(3), P(4), P(1), 0x2277aa);
+  px(g, cx - P(2), cy + P(2), P(4), P(1), 0x2277aa);
+  // Continents (green blobs)
+  px(g, cx - P(2), cy - P(1), P(2), P(2), C.leafDark);
+  px(g, cx + P(1), cy, P(2), P(1), C.leafDark);
+  px(g, cx - P(1), cy + P(1), P(1), P(1), C.leaf);
+  // Orbit lines
+  px(g, x + P(2), y + P(2), sw - P(4), 1, 0x88bbdd);
+  px(g, x + P(2), y + sh - P(3), sw - P(4), 1, 0x88bbdd);
 }
 
 // ── Room Decorator Functions ────────────────────────────────
 
-export function decorateFiles(g: Graphics, x: number, y: number, w: number, h: number): void {
+/** Search/Library — 440×400 — Big room with bookshelves, reading areas */
+function decorateSearch(g: Graphics, x: number, y: number, w: number, h: number): void {
   drawWoodFloor(g, x, y, w, h);
-  drawTopWall(g, x, y, w, h);
 
-  // Two wide bookshelves on wall
-  drawWideShelf(g, x + P(2), y + P(5));
-  drawWideShelf(g, x + P(20), y + P(5));
+  // Long row of bookshelves along top wall (pushed down for label)
+  drawBookshelf(g, x + P(2), y + P(7), true);
+  drawBookshelf(g, x + P(20), y + P(7), true);
+  drawBookshelf(g, x + P(38), y + P(7), true);
+  drawBookshelf(g, x + P(56), y + P(7), false);
 
-  // Boxes on shelf area
-  drawBox(g, x + P(38), y + P(8), C.paleWood);
-  drawBox(g, x + P(43), y + P(10), C.medWood);
+  // Side shelves on left
+  drawBookshelf(g, x + P(2), y + P(23), false);
+  drawBookshelf(g, x + P(2), y + P(39), false);
 
-  // Plant top left
-  drawPlantLarge(g, x + P(2), y + P(20));
+  // Reading table center-left
+  drawSmallTable(g, x + P(18), y + P(35), P(12), P(6));
+  drawChair(g, x + P(21), y + P(43));
+  drawChair(g, x + P(21), y + P(29));
 
-  // Filing cabinets on left
-  drawFileCabinet(g, x + P(2), y + P(30));
+  // Second reading area center-right
+  drawSmallTable(g, x + P(40), y + P(35), P(12), P(6));
+  drawChair(g, x + P(43), y + P(43));
+  drawChair(g, x + P(43), y + P(29));
 
-  // Desks with monitors
-  drawDeskWithMonitor(g, x + P(14), y + P(34));
-  drawDeskWithMonitor(g, x + P(32), y + P(34));
+  // Papers and books scattered on tables
+  drawPapers(g, x + P(20), y + P(36));
+  drawPapers(g, x + P(42), y + P(37));
+  drawCoffeeCup(g, x + P(50), y + P(36));
 
-  // Chairs in front of desks
-  drawChair(g, x + P(17), y + P(46));
-  drawChair(g, x + P(35), y + P(46));
+  // Large plants
+  drawPlantLarge(g, x + P(2), y + h - P(12));
+  drawPlantLarge(g, x + w - P(8), y + P(23));
 
-  // Papers and coffee on desks
-  drawCoffeeCup(g, x + P(28), y + P(36));
-  drawPapers(g, x + P(14), y + P(38));
+  // Filing cabinet in corner
+  drawFileCabinet(g, x + w - P(7), y + h - P(14));
+  drawFileCabinet(g, x + w - P(13), y + h - P(14));
 
-  // Small plant bottom-right
-  drawPlantSmall(g, x + w - P(6), y + h - P(10));
+  // Globe on a stand (research theme)
+  const gx = x + P(60), gy = y + P(50);
+  px(g, gx, gy, P(6), P(6), C.leafDark);
+  px(g, gx + P(1), gy + P(1), P(4), P(4), 0x4488aa);
+  px(g, gx + P(2), gy + P(2), P(2), P(2), C.leaf);
+  px(g, gx + P(2), gy + P(6), P(2), P(2), C.darkWood);
 }
 
-export function decorateTerminal(g: Graphics, x: number, y: number, w: number, h: number): void {
-  drawWoodFloor(g, x, y, w, h);
-  drawTopWall(g, x, y, w, h);
+/** Terminal — 280×400 — Server room with racks and monitors */
+function decorateTerminal(g: Graphics, x: number, y: number, w: number, h: number): void {
+  drawDarkFloor(g, x, y, w, h);
 
-  // Bookshelves on wall
-  drawWideShelf(g, x + P(2), y + P(5));
-  drawWideShelf(g, x + P(20), y + P(5));
+  // Server racks along top
+  drawServerRack(g, x + P(2), y + P(7));
+  drawServerRack(g, x + P(12), y + P(7));
+  drawServerRack(g, x + P(22), y + P(7));
 
-  // 4 desks in a 2x2 arrangement
-  drawDeskWithMonitor(g, x + P(6), y + P(22));
-  drawDeskWithMonitor(g, x + P(28), y + P(22));
-  drawDeskWithMonitor(g, x + P(6), y + P(40));
-  drawDeskWithMonitor(g, x + P(28), y + P(40));
+  // More racks on right wall
+  drawServerRack(g, x + w - P(9), y + P(25));
+  drawServerRack(g, x + w - P(9), y + P(43));
 
-  // Chairs
-  drawChair(g, x + P(10), y + P(32));
-  drawChair(g, x + P(32), y + P(32));
-  drawChair(g, x + P(10), y + P(50));
-  drawChair(g, x + P(32), y + P(50));
+  // Monitoring desks (green terminal screens)
+  drawServerMonitor(g, x + P(4), y + P(29));
+  drawChair(g, x + P(8), y + P(39));
 
-  // Coffee cups on desks
-  drawCoffeeCup(g, x + P(20), y + P(24));
-  drawCoffeeCup(g, x + P(42), y + P(42));
+  drawServerMonitor(g, x + P(4), y + P(49));
+  drawChair(g, x + P(8), y + P(59));
 
-  // Water cooler
-  drawWaterCooler(g, x + P(48), y + P(52));
+  // Cable trays (lines on floor)
+  px(g, x + P(10), y + P(23), P(1), h - P(25), C.metalDark);
+  px(g, x + P(20), y + P(23), P(1), h - P(25), C.metalDark);
+
+  // Warning stripes near racks
+  for (let i = 0; i < 3; i++) {
+    px(g, x + P(2) + i * P(3), y + h - P(4), P(2), P(1), C.bookYellow);
+  }
+
+  // Status LEDs panel
+  px(g, x + P(34), y + P(9), P(6), P(10), C.metalFrame);
+  px(g, x + P(35), y + P(10), P(1), P(1), C.led);
+  px(g, x + P(37), y + P(10), P(1), P(1), C.led);
+  px(g, x + P(35), y + P(12), P(1), P(1), C.ledRed);
+  px(g, x + P(37), y + P(12), P(1), P(1), C.led);
+  px(g, x + P(35), y + P(14), P(1), P(1), C.ledBlue);
+  px(g, x + P(37), y + P(14), P(1), P(1), C.led);
+}
+
+/** Web Lab — 340×400 — Tech lab with big screens and network gear */
+function decorateWeb(g: Graphics, x: number, y: number, w: number, h: number): void {
+  drawCarpetFloor(g, x, y, w, h);
+
+  // Large globe/network screen on wall
+  drawGlobeScreen(g, x + P(4), y + P(7));
+
+  // Server rack
+  drawServerRack(g, x + w - P(9), y + P(7));
+
+  // Workstations
+  drawDeskWithMonitor(g, x + P(4), y + P(27));
+  drawChair(g, x + P(8), y + P(37));
+
+  drawDeskWithMonitor(g, x + P(28), y + P(27));
+  drawChair(g, x + P(32), y + P(37));
+
+  // Network hub table
+  drawSmallTable(g, x + P(14), y + P(51), P(14), P(5));
+  // Network device on table
+  px(g, x + P(16), y + P(52), P(8), P(3), C.metalDark);
+  px(g, x + P(17), y + P(53), P(1), P(1), C.led);
+  px(g, x + P(19), y + P(53), P(1), P(1), C.led);
+  px(g, x + P(21), y + P(53), P(1), P(1), C.ledBlue);
 
   // Plants
-  drawPlantSmall(g, x + P(2), y + h - P(8));
-  drawPlantSmall(g, x + P(48), y + P(22));
+  drawPlantLarge(g, x + P(2), y + h - P(12));
+  drawPlantSmall(g, x + w - P(5), y + h - P(8));
+
+  // Cables along wall
+  px(g, x + w - P(2), y + P(23), P(1), h - P(27), C.metalDark);
 }
 
-export function decorateSearch(g: Graphics, x: number, y: number, w: number, h: number): void {
+/** Files/Archive — 320×320 — Filing room with cabinets and storage */
+function decorateFiles(g: Graphics, x: number, y: number, w: number, h: number): void {
   drawWoodFloor(g, x, y, w, h);
-  drawTopWall(g, x, y, w, h);
 
-  // Three bookshelves along top wall
-  drawWideShelf(g, x + P(2), y + P(5));
-  drawNarrowShelf(g, x + P(20), y + P(5));
-  drawWideShelf(g, x + P(32), y + P(5));
+  // Row of filing cabinets along top
+  drawFileCabinet(g, x + P(2), y + P(7));
+  drawFileCabinet(g, x + P(9), y + P(7));
+  drawFileCabinet(g, x + P(16), y + P(7));
+  drawFileCabinet(g, x + P(23), y + P(7));
 
-  // Side bookshelves
-  drawNarrowShelf(g, x + P(2), y + P(22));
-  drawNarrowShelf(g, x + w - P(12), y + P(22));
+  // Bookshelves on left
+  drawBookshelf(g, x + P(2), y + P(21), true);
 
-  // Reading table in center
-  drawSmallTable(g, x + P(16), y + P(38));
+  // Desk for sorting files
+  drawDeskWithMonitor(g, x + P(24), y + P(25));
+  drawChair(g, x + P(28), y + P(35));
 
-  // Chair at table
-  drawChair(g, x + P(19), y + P(45));
+  // Storage boxes
+  drawBox(g, x + P(2), y + P(39), C.paleWood);
+  drawBox(g, x + P(8), y + P(41), C.medWood);
+  drawBox(g, x + P(2), y + P(43), C.lightWood);
+
+  // Papers around
+  drawPapers(g, x + P(38), y + P(9));
+  drawPapers(g, x + P(26), y + P(27));
+
+  // Plant
+  drawPlantSmall(g, x + w - P(5), y + h - P(8));
+  drawPlantLarge(g, x + w - P(8), y + P(21));
+}
+
+/** Thinking/Meeting Room — 440×320 — Conference room with round table */
+function decorateThinking(g: Graphics, x: number, y: number, w: number, h: number): void {
+  drawWarmCarpet(g, x, y, w, h);
+
+  // Large round conference table in center (shifted down slightly)
+  drawRoundTable(g, x + w / 2, y + h / 2 - P(1), P(18));
+
+  // Chairs around the table (6 chairs)
+  drawChair(g, x + w / 2 - P(12), y + h / 2 - P(11));  // top-left
+  drawChair(g, x + w / 2 + P(8), y + h / 2 - P(11));   // top-right
+  drawChair(g, x + w / 2 - P(16), y + h / 2 - P(1));   // left
+  drawChair(g, x + w / 2 + P(12), y + h / 2 - P(1));   // right
+  drawChair(g, x + w / 2 - P(12), y + h / 2 + P(11));  // bottom-left
+  drawChair(g, x + w / 2 + P(8), y + h / 2 + P(11));   // bottom-right
+
+  // Whiteboard on top wall
+  drawWhiteboard(g, x + P(4), y + P(7), P(24), P(12));
+
+  // Second whiteboard (brainstorming)
+  drawWhiteboard(g, x + P(32), y + P(7), P(20), P(12));
+
+  // Painting on right side
+  drawPainting(g, x + w - P(14), y + P(7), P(10), P(7));
 
   // Papers on table
-  drawPapers(g, x + P(18), y + P(39));
+  drawPapers(g, x + w / 2 - P(4), y + h / 2 - P(3));
+  drawCoffeeCup(g, x + w / 2 + P(2), y + h / 2 - P(1));
 
   // Plants in corners
   drawPlantLarge(g, x + P(2), y + h - P(12));
   drawPlantLarge(g, x + w - P(8), y + h - P(12));
 }
 
-export function decorateWeb(g: Graphics, x: number, y: number, w: number, h: number): void {
-  drawCarpetFloor(g, x, y, w, h);
-  drawTopWall(g, x, y, w, h);
-
-  // Large screen / TV on wall
-  const sx = x + P(10), sy = y + P(5);
-  px(g, sx, sy, P(20), P(12), C.screenFrame);
-  px(g, sx + P(1), sy + P(1), P(18), P(10), C.screenDark);
-  px(g, sx + P(2), sy + P(2), P(16), P(8), C.screenBlue);
-  // Browser UI on screen
-  px(g, sx + P(2), sy + P(2), P(16), P(1), C.metalMid); // address bar
-  px(g, sx + P(3), sy + P(2), P(8), P(1), C.white); // URL
-  px(g, sx + P(3), sy + P(4), P(10), P(1), C.white); // content
-  px(g, sx + P(3), sy + P(6), P(12), P(1), C.offWhite);
-  px(g, sx + P(3), sy + P(8), P(8), P(1), C.offWhite);
-
-  // Server rack on right
-  drawServerRack(g, x + w - P(9), y + P(5));
-
-  // Desks
-  drawDeskWithMonitor(g, x + P(4), y + P(22));
-  drawDeskWithMonitor(g, x + P(28), y + P(22));
-
-  // Chairs
-  drawChair(g, x + P(8), y + P(32));
-  drawChair(g, x + P(32), y + P(32));
-
-  // Plants
-  drawPlantLarge(g, x + P(2), y + h - P(12));
-  drawPlantLarge(g, x + w - P(8), y + h - P(12));
-}
-
-export function decorateThinking(g: Graphics, x: number, y: number, w: number, h: number): void {
-  drawCarpetFloor(g, x, y, w, h);
-  drawTopWall(g, x, y, w, h);
+/** Messaging/Lounge — 300×320 — Relaxed chat area with couches */
+function decorateMessaging(g: Graphics, x: number, y: number, w: number, h: number): void {
+  drawGreenCarpet(g, x, y, w, h);
 
   // Painting on wall
-  drawPainting(g, x + P(12), y + P(5));
+  drawPainting(g, x + P(8), y + P(7), P(14), P(8));
 
-  // Bookshelf on wall left
-  drawNarrowShelf(g, x + P(2), y + P(5));
+  // Bookshelf on left
+  drawBookshelf(g, x + P(2), y + P(7), false);
 
-  // Conference table in center
-  drawConferenceTable(g, x + P(6), y + P(22));
+  // Sofa (wide, facing center)
+  drawSofa(g, x + P(4), y + P(21), P(16));
 
-  // Chairs around table (4 chairs)
-  drawChair(g, x + P(9), y + P(18));   // top-left
-  drawChair(g, x + P(19), y + P(18));  // top-right
-  drawChair(g, x + P(9), y + P(34));   // bottom-left
-  drawChair(g, x + P(19), y + P(34));  // bottom-right
+  // Coffee table in front of sofa
+  drawSmallTable(g, x + P(6), y + P(33), P(12), P(5));
+  drawCoffeeCup(g, x + P(10), y + P(34));
+  drawCoffeeCup(g, x + P(14), y + P(34));
 
-  // Whiteboard on bottom wall area
-  drawWhiteboard(g, x + P(4), y + P(44));
+  // Second smaller sofa/loveseat on right
+  drawSofa(g, x + P(24), y + P(25), P(10));
 
-  // Plant corner
-  drawPlantLarge(g, x + w - P(8), y + h - P(12));
-}
-
-export function decorateMessaging(g: Graphics, x: number, y: number, w: number, h: number): void {
-  drawCarpetFloor(g, x, y, w, h);
-  drawTopWall(g, x, y, w, h);
-
-  // Painting center
-  drawPainting(g, x + P(14), y + P(5));
-
-  // Bookshelves flanking painting
-  drawNarrowShelf(g, x + P(2), y + P(5));
-  drawNarrowShelf(g, x + w - P(12), y + P(5));
-
-  // Sofa
-  drawSofa(g, x + P(8), y + P(24));
-
-  // Coffee table in front
-  drawSmallTable(g, x + P(10), y + P(36));
-
-  // Coffee cups on table
-  drawCoffeeCup(g, x + P(12), y + P(37));
+  // Small side table
+  drawSmallTable(g, x + P(26), y + P(37), P(6), P(4));
+  drawPapers(g, x + P(27), y + P(38));
 
   // Plants
   drawPlantLarge(g, x + P(2), y + h - P(12));
-  drawPlantLarge(g, x + w - P(8), y + h - P(12));
+  drawPlantSmall(g, x + w - P(5), y + P(7));
+
+  // Wall clock
+  drawClock(g, x + w - P(8), y + P(7));
 }
 
-export function decorateTasksRoom(g: Graphics, x: number, y: number, w: number, h: number): void {
-  drawWoodFloor(g, x, y, w, h);
-  drawTopWall(g, x, y, w, h);
+/** Spawn/Lobby — 220×260 — Small entry area with portal */
+function decorateSpawn(g: Graphics, x: number, y: number, w: number, h: number): void {
+  drawDarkFloor(g, x, y, w, h);
 
-  // Big whiteboard on wall
-  drawWhiteboard(g, x + P(4), y + P(5), true);
+  // Portal in center (shifted down for label)
+  drawPortalEffect(g, x + w / 2, y + h / 2 - P(2));
 
-  // Sticky notes next to whiteboard
-  const noteColors = [C.bookYellow, C.bookPink, C.bookGreen, 0x88bbff, C.bookOrange];
-  for (let i = 0; i < 5; i++) {
-    const nx = x + P(28) + (i % 3) * P(4);
-    const ny = y + P(6) + Math.floor(i / 3) * P(4);
-    drawStickyNote(g, nx, ny, noteColors[i]);
+  // Welcome mat
+  const matX = x + (w - P(14)) / 2;
+  const matY = y + h - P(12);
+  px(g, matX, matY, P(14), P(4), C.couchSeat);
+  px(g, matX + P(1), matY + P(1), P(12), P(2), C.couchCushion);
+
+  // Small plants flanking portal
+  drawPlantSmall(g, x + P(2), y + P(12));
+  drawPlantSmall(g, x + w - P(5), y + P(12));
+
+  // Decorative lights along walls
+  for (let i = 0; i < 3; i++) {
+    px(g, x + P(3) + i * P(7), y + P(7), P(2), P(2), C.portalGlow);
   }
+}
 
-  // Two desks
-  drawLaptopDesk(g, x + P(6), y + P(26));
-  drawDeskWithMonitor(g, x + P(28), y + P(26));
+/** Idle/Break Room — 460×260 — Wide kitchen/break area */
+function decorateIdle(g: Graphics, x: number, y: number, w: number, h: number): void {
+  drawTileFloor(g, x, y, w, h);
 
-  // Chairs
-  drawChair(g, x + P(9), y + P(36));
-  drawChair(g, x + P(32), y + P(36));
+  // Kitchen counter along top
+  drawCounter(g, x + P(2), y + P(7), P(28));
+  drawCoffeeMachine(g, x + P(4), y + P(3));
 
-  // Papers on desk
-  drawPapers(g, x + P(42), y + P(28));
+  // Fridge next to counter
+  drawFridge(g, x + P(32), y + P(7));
+
+  // Vending machine on right
+  drawVendingMachine(g, x + w - P(10), y + P(7));
+
+  // Water cooler
+  drawWaterCooler(g, x + P(42), y + P(7));
+
+  // Dining tables (2 round tables)
+  drawRoundTable(g, x + P(18), y + P(33), P(10));
+  drawChair(g, x + P(10), y + P(29));
+  drawChair(g, x + P(22), y + P(29));
+  drawChair(g, x + P(10), y + P(37));
+  drawChair(g, x + P(22), y + P(37));
+
+  drawRoundTable(g, x + P(46), y + P(33), P(10));
+  drawChair(g, x + P(38), y + P(29));
+  drawChair(g, x + P(50), y + P(29));
+  drawChair(g, x + P(38), y + P(37));
+  drawChair(g, x + P(50), y + P(37));
+
+  // Coffee cups on tables
+  drawCoffeeCup(g, x + P(17), y + P(32));
+  drawCoffeeCup(g, x + P(45), y + P(32));
+
+  // Wall clock
+  drawClock(g, x + P(52), y + P(7));
 
   // Plants
-  drawPlantSmall(g, x + P(2), y + h - P(8));
-  drawPlantLarge(g, x + w - P(8), y + h - P(12));
-}
-
-export function decorateIdle(g: Graphics, x: number, y: number, w: number, h: number): void {
-  drawTileFloor(g, x, y, w, h);
-  drawTopWall(g, x, y, w, h);
-
-  // Vending machine on left
-  drawVendingMachine(g, x + P(3), y + P(5));
-
-  // Clock on wall center
-  drawClock(g, x + P(18), y + P(5));
-
-  // Fridge on right
-  drawFridge(g, x + w - P(9), y + P(5));
-
-  // Counter with coffee machine
-  drawCounter(g, x + P(14), y + P(12), P(18));
-  drawCoffeeMachine(g, x + P(26), y + P(7));
-
-  // Small table with chairs
-  drawSmallTable(g, x + P(12), y + P(32));
-  drawChair(g, x + P(8), y + P(38));
-  drawChair(g, x + P(20), y + P(38));
-
-  // Coffee cup on table
-  drawCoffeeCup(g, x + P(15), y + P(33));
-
-  // Plant
-  drawPlantSmall(g, x + P(2), y + h - P(8));
-}
-
-export function decorateSpawn(g: Graphics, x: number, y: number, w: number, h: number): void {
-  drawDarkFloor(g, x, y, w, h);
-  drawTopWall(g, x, y, w, h);
-
-  // Portal effect in center
-  drawPortalEffect(g, x + w / 2, y + h / 2 - P(4));
-
-  // Plants flanking portal
-  drawPlantLarge(g, x + P(4), y + P(22));
-  drawPlantLarge(g, x + w - P(10), y + P(22));
-
-  // Welcome mat at bottom
-  const matX = x + P(12), matY = y + h - P(14);
-  px(g, matX, matY, P(16), P(5), C.couchSeat);
-  px(g, matX + P(1), matY + P(1), P(14), P(3), C.couchCushion);
-  px(g, matX + P(1), matY + P(1), P(14), P(1), C.couchHighlight);
-
-  // Small plants at bottom corners
   drawPlantSmall(g, x + P(2), y + h - P(8));
   drawPlantSmall(g, x + w - P(5), y + h - P(8));
 }
 
+/** Tasks/Project Room — 380×260 — Kanban boards and work area */
+function decorateTasks(g: Graphics, x: number, y: number, w: number, h: number): void {
+  drawWoodFloor(g, x, y, w, h);
+
+  // Large Kanban board on top wall
+  drawKanbanBoard(g, x + P(2), y + P(7), P(30), P(18));
+
+  // Sticky notes cluster on right wall
+  const noteColors = [C.stickyYellow, C.stickyPink, C.stickyGreen, C.stickyBlue, C.stickyOrange, C.stickyYellow];
+  for (let i = 0; i < 6; i++) {
+    const nx = x + P(36) + (i % 3) * P(4);
+    const ny = y + P(7) + Math.floor(i / 3) * P(4);
+    drawStickyNote(g, nx, ny, noteColors[i]);
+  }
+
+  // Laptop desk
+  drawLaptopDesk(g, x + P(6), y + P(31));
+  drawChair(g, x + P(9), y + P(41));
+
+  // Standing desk with monitor
+  drawDeskWithMonitor(g, x + P(30), y + P(31));
+  drawChair(g, x + P(34), y + P(41));
+
+  // Papers on desks
+  drawPapers(g, x + P(44), y + P(33));
+
+  // Whiteboard (smaller, for quick notes)
+  drawWhiteboard(g, x + P(50), y + P(7), P(14), P(10));
+
+  // Plant
+  drawPlantLarge(g, x + w - P(8), y + h - P(12));
+  drawPlantSmall(g, x + P(2), y + h - P(8));
+}
+
 /** Map zone ID to decorator */
 export const ZONE_DECORATORS: Record<string, (g: Graphics, x: number, y: number, w: number, h: number) => void> = {
-  files: decorateFiles,
-  terminal: decorateTerminal,
   search: decorateSearch,
+  terminal: decorateTerminal,
   web: decorateWeb,
+  files: decorateFiles,
   thinking: decorateThinking,
   messaging: decorateMessaging,
-  tasks: decorateTasksRoom,
-  idle: decorateIdle,
   spawn: decorateSpawn,
+  idle: decorateIdle,
+  tasks: decorateTasks,
 };

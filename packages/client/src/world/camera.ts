@@ -78,6 +78,47 @@ export class Camera {
     return this.zoom;
   }
 
+  /** Zoom in by a step amount, centered on viewport */
+  zoomIn(): void {
+    this.zoomBy(1.2);
+  }
+
+  /** Zoom out by a step amount, centered on viewport */
+  zoomOut(): void {
+    this.zoomBy(1 / 1.2);
+  }
+
+  /** Reset to fit the world in the viewport (accounting for sidebar) */
+  resetView(worldW: number, worldH: number, sidebarW = 300): void {
+    const screenW = this.app.screen.width;
+    const screenH = this.app.screen.height;
+    const availW = screenW - sidebarW;
+    const pad = 16;
+    const scaleX = (availW - pad * 2) / worldW;
+    const scaleY = (screenH - pad * 2) / worldH;
+    const fitZoom = Math.min(scaleX, scaleY, 1);
+    this.setZoom(fitZoom);
+    this.world.position.set(
+      (availW - worldW * fitZoom) / 2,
+      (screenH - worldH * fitZoom) / 2,
+    );
+  }
+
+  private zoomBy(factor: number): void {
+    const oldZoom = this.zoom;
+    const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, this.zoom * factor));
+    this.zoom = newZoom;
+    // Zoom centered on viewport center
+    const screenW = this.app.screen.width;
+    const screenH = this.app.screen.height;
+    const cx = screenW / 2;
+    const cy = screenH / 2;
+    const zoomRatio = newZoom / oldZoom;
+    this.world.position.x = cx - (cx - this.world.position.x) * zoomRatio;
+    this.world.position.y = cy - (cy - this.world.position.y) * zoomRatio;
+    this.world.scale.set(this.zoom);
+  }
+
   destroy(): void {
     const canvas = this.app.canvas;
     canvas.removeEventListener('wheel', this.onWheel);

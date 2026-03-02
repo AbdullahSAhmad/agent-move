@@ -70,6 +70,47 @@
     }
     .connected { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.2); }
     .disconnected { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.2); }
+
+    /* Zoom controls */
+    #zoom-controls {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      display: flex;
+      gap: 6px;
+      z-index: 10;
+    }
+    #zoom-controls button {
+      width: 36px;
+      height: 36px;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 8px;
+      background: rgba(18, 20, 40, 0.85);
+      backdrop-filter: blur(8px);
+      color: #ccc;
+      font-size: 18px;
+      font-family: 'Inter', sans-serif;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      line-height: 1;
+      padding: 0;
+    }
+    #zoom-controls button:hover {
+      background: rgba(30, 34, 64, 0.95);
+      color: #fff;
+      border-color: rgba(255,255,255,0.2);
+    }
+    #zoom-controls button:active {
+      background: rgba(40, 44, 74, 1);
+    }
+    #zoom-controls button svg {
+      width: 18px;
+      height: 18px;
+      fill: currentColor;
+    }
   </style>
 </head>
 <body>
@@ -78,6 +119,17 @@
       <h2>AgentFlow</h2>
       <div id="connection-status" class="disconnected">Disconnected</div>
       <div id="agent-list"></div>
+    </div>
+    <div id="zoom-controls">
+      <button id="zoom-in" title="Zoom In">
+        <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+      </button>
+      <button id="zoom-out" title="Zoom Out">
+        <svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/></svg>
+      </button>
+      <button id="zoom-reset" title="Fit to View">
+        <svg viewBox="0 0 24 24"><path d="M3 5v4h2V5h4V3H5a2 2 0 00-2 2zm2 10H3v4a2 2 0 002 2h4v-2H5v-4zm14 4h-4v2h4a2 2 0 002-2v-4h-2v4zm0-16h-4v2h4v4h2V5a2 2 0 00-2-2z"/></svg>
+      </button>
     </div>
   </div>
   <script type="module" src="/src/main.ts"></script>

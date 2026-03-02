@@ -44,22 +44,22 @@ export class ZoneRenderer {
     const glowBorder = new Graphics();
     container.addChild(glowBorder);
 
-    // Zone label (top area, over the wall header)
+    // Zone label — top-left corner badge
     const labelStyle = new TextStyle({
-      fontSize: 12,
+      fontSize: 11,
       fontFamily: "'Courier New', 'Consolas', monospace",
-      fill: 0xcccccc,
+      fill: 0xffffff,
       fontWeight: 'bold',
       letterSpacing: 1,
       dropShadow: {
-        alpha: 0.9,
-        blur: 2,
+        alpha: 1,
+        blur: 3,
         color: 0x000000,
         distance: 1,
       },
     });
     const label = new Text({ text: `${config.icon} ${config.label}`, style: labelStyle });
-    label.position.set(6, 4);
+    label.position.set(8, 6);
     container.addChild(label);
 
     return { container, staticBg, glowBorder, config, agentCount: 0, currentGlow: 0 };

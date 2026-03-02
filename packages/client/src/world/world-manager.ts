@@ -42,22 +42,13 @@ export class WorldManager {
     // Set up camera
     this.camera = new Camera(app, this.root);
 
-    // Auto-fit all zones into the available viewport (accounting for sidebar)
-    const screenW = app.screen.width;
-    const screenH = app.screen.height;
-    const sidebarW = 300;
-    const availW = screenW - sidebarW;
-    const pad = 16;
+    // Auto-fit to viewport
+    this.camera.resetView(WORLD_WIDTH, WORLD_HEIGHT);
+  }
 
-    const scaleX = (availW - pad * 2) / WORLD_WIDTH;
-    const scaleY = (screenH - pad * 2) / WORLD_HEIGHT;
-    const fitZoom = Math.min(scaleX, scaleY, 1); // don't upscale beyond 1x
-
-    this.camera.setZoom(fitZoom);
-    this.root.position.set(
-      (availW - WORLD_WIDTH * fitZoom) / 2,
-      (screenH - WORLD_HEIGHT * fitZoom) / 2,
-    );
+  /** Reset camera to fit all rooms */
+  resetCamera(): void {
+    this.camera.resetView(WORLD_WIDTH, WORLD_HEIGHT);
   }
 
   /** Add an agent to the agent layer (accepts object with .container or a Container directly) */

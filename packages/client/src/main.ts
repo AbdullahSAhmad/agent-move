@@ -27,6 +27,11 @@ async function main() {
   const ws = new WsClient(store);
   ws.connect();
 
+  // Zoom controls
+  document.getElementById('zoom-in')!.addEventListener('click', () => world.camera.zoomIn());
+  document.getElementById('zoom-out')!.addEventListener('click', () => world.camera.zoomOut());
+  document.getElementById('zoom-reset')!.addEventListener('click', () => world.resetCamera());
+
   // Game loop
   pixiApp.ticker.add(() => {
     agentManager.update(pixiApp.ticker.deltaMS);
