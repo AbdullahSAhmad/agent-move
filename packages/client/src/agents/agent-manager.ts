@@ -47,6 +47,11 @@ export class AgentManager {
   private sound: SoundManager | null = null;
   private notifications: NotificationManager | null = null;
   private _focusedAgentId: string | null = null;
+  private onSpawnBound: (agent: AgentState) => void;
+  private onUpdateBound: (agent: AgentState) => void;
+  private onIdleBound: (agent: AgentState) => void;
+  private onShutdownBound: (agentId: string) => void;
+  private onResetBound: (agents: Map<string, AgentState>) => void;
 
   setSoundManager(sound: SoundManager): void {
     this.sound = sound;
@@ -72,11 +77,17 @@ export class AgentManager {
 
     this.zoneGlow = new ZoneGlow();
 
-    this.store.on('agent:spawn', (agent) => this.onSpawn(agent));
-    this.store.on('agent:update', (agent) => this.onUpdate(agent));
-    this.store.on('agent:idle', (agent) => this.onIdle(agent));
-    this.store.on('agent:shutdown', (agentId) => this.onShutdown(agentId));
-    this.store.on('state:reset', (agents) => this.onReset(agents));
+    this.onSpawnBound = (agent) => this.onSpawn(agent);
+    this.onUpdateBound = (agent) => this.onUpdate(agent);
+    this.onIdleBound = (agent) => this.onIdle(agent);
+    this.onShutdownBound = (agentId) => this.onShutdown(agentId);
+    this.onResetBound = (agents) => this.onReset(agents);
+
+    this.store.on('agent:spawn', this.onSpawnBound);
+    this.store.on('agent:update', this.onUpdateBound);
+    this.store.on('agent:idle', this.onIdleBound);
+    this.store.on('agent:shutdown', this.onShutdownBound);
+    this.store.on('state:reset', this.onResetBound);
   }
 
   /** Build rich speech messages from agent state */
@@ -472,6 +483,20 @@ export class AgentManager {
       this._focusedAgentId = ids[(idx + 1) % ids.length];
     }
     return this._focusedAgentId;
+  }
+
+  dispose(): void {
+    this.store.off('agent:spawn', this.onSpawnBound);
+    this.store.off('agent:update', this.onUpdateBound);
+    this.store.off('agent:idle', this.onIdleBound);
+    this.store.off('agent:shutdown', this.onShutdownBound);
+    this.store.off('state:reset', this.onResetBound);
+    for (const [, managed] of this.agents) {
+      managed.sprite.destroy();
+    }
+    this.agents.clear();
+    this.lines.destroy();
+    this.particles.destroy();
   }
 
   /** Get world position of the focused agent (if any) */

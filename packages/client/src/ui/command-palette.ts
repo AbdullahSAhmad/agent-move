@@ -1,6 +1,7 @@
 import type { AgentState, ZoneId } from '@agent-move/shared';
 import { ZONES, ZONE_MAP } from '@agent-move/shared';
 import type { StateStore } from '../connection/state-store.js';
+import { escapeHtml } from '../utils/formatting.js';
 
 /**
  * Feature 2a: Command Palette (Cmd+K / Ctrl+K)
@@ -246,8 +247,8 @@ export class CommandPalette {
       return `<div class="cmd-item ${selected} ${catClass}" data-index="${i}">
         <span class="cmd-item-icon">${action.icon}</span>
         <div class="cmd-item-text">
-          <div class="cmd-item-label">${this.esc(action.label)}</div>
-          <div class="cmd-item-desc">${this.esc(action.description)}</div>
+          <div class="cmd-item-label">${escapeHtml(action.label)}</div>
+          <div class="cmd-item-desc">${escapeHtml(action.description)}</div>
         </div>
         <span class="cmd-item-cat">${action.category}</span>
       </div>`;
@@ -306,7 +307,4 @@ export class CommandPalette {
     }
   }
 
-  private esc(s: string): string {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
 }

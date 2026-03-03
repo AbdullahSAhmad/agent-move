@@ -55,7 +55,7 @@ export async function main() {
   let actualPort = config.port;
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
-      await app.listen({ port: actualPort, host: '0.0.0.0' });
+      await app.listen({ port: actualPort, host: '127.0.0.1' });
       break;
     } catch (err: any) {
       if (err.code === 'EADDRINUSE' && attempt < 9) {
@@ -67,8 +67,6 @@ export async function main() {
   }
   console.log(`Server listening on http://localhost:${actualPort}`);
 
-  return { port: actualPort };
-
   // Graceful shutdown
   const shutdown = async () => {
     console.log('Shutting down...');
@@ -78,6 +76,8 @@ export async function main() {
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+
+  return { port: actualPort };
 }
 
 // Auto-run when executed directly (not via CLI wrapper)

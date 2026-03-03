@@ -83,8 +83,11 @@ export class AgentStateManager extends EventEmitter {
     });
 
     const cutoff = Date.now() - MAX_HISTORY_AGE_MS;
-    while (this.timelineBuffer.length > 0 && this.timelineBuffer[0].timestamp < cutoff) {
-      this.timelineBuffer.shift();
+    const firstValid = this.timelineBuffer.findIndex(e => e.timestamp >= cutoff);
+    if (firstValid > 0) {
+      this.timelineBuffer.splice(0, firstValid);
+    } else if (firstValid === -1 && this.timelineBuffer.length > 0) {
+      this.timelineBuffer.length = 0;
     }
     if (this.timelineBuffer.length > MAX_TIMELINE_EVENTS) {
       this.timelineBuffer.splice(0, this.timelineBuffer.length - MAX_TIMELINE_EVENTS);
@@ -100,8 +103,11 @@ export class AgentStateManager extends EventEmitter {
     entries.push(entry);
 
     const cutoff = Date.now() - MAX_HISTORY_AGE_MS;
-    while (entries.length > 0 && entries[0].timestamp < cutoff) {
-      entries.shift();
+    const firstValid = entries.findIndex(e => e.timestamp >= cutoff);
+    if (firstValid > 0) {
+      entries.splice(0, firstValid);
+    } else if (firstValid === -1 && entries.length > 0) {
+      entries.length = 0;
     }
     if (entries.length > MAX_HISTORY_PER_AGENT) {
       entries.splice(0, entries.length - MAX_HISTORY_PER_AGENT);
@@ -754,6 +760,7 @@ export class AgentStateManager extends EventEmitter {
     }
 
     this.agents.delete(sessionId);
+    this.activityHistory.delete(sessionId);
 
     const shutdownEvent = {
       type: 'agent:shutdown',

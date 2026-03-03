@@ -44,7 +44,7 @@ export class RelationshipLines {
 
   /** Redraw all lines based on current agent positions */
   update(agents: Map<string, AgentPos>, dt: number): void {
-    this.time += dt;
+    this.time = (this.time + dt) % 1_000_000;
     this.graphics.clear();
 
     // Decrement pulse timers

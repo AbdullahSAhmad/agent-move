@@ -1,5 +1,5 @@
 import chokidar from 'chokidar';
-import { readFile, stat } from 'fs/promises';
+import { stat, open } from 'fs/promises';
 import { join, basename } from 'path';
 import type { AgentStateManager } from '../state/agent-state-manager.js';
 import { JsonlParser } from './jsonl-parser.js';
@@ -9,6 +9,8 @@ export class FileWatcher {
   private watcher: chokidar.FSWatcher | null = null;
   private byteOffsets = new Map<string, number>();
   private parser = new JsonlParser();
+  /** Per-file lock to prevent concurrent processFile calls for the same file */
+  private fileLocks = new Map<string, Promise<void>>();
 
   constructor(
     private claudeHome: string,
@@ -45,7 +47,13 @@ export class FileWatcher {
     this.watcher?.close();
   }
 
-  private async processFile(filePath: string) {
+  private processFile(filePath: string): void {
+    const prev = this.fileLocks.get(filePath) ?? Promise.resolve();
+    const next = prev.then(() => this.doProcessFile(filePath)).catch(() => {});
+    this.fileLocks.set(filePath, next);
+  }
+
+  private async doProcessFile(filePath: string) {
     try {
       const fileStats = await stat(filePath);
       const currentOffset = this.byteOffsets.get(filePath) ?? 0;
@@ -53,7 +61,6 @@ export class FileWatcher {
       if (fileStats.size <= currentOffset) return;
 
       // Read only new bytes
-      const { open } = await import('fs/promises');
       const handle = await open(filePath, 'r');
       try {
         const buffer = Buffer.alloc(fileStats.size - currentOffset);

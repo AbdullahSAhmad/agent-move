@@ -509,6 +509,13 @@ export class AgentSprite {
 
   /** Fade out and resolve when done */
   fadeOut(): Promise<void> {
+    if (this.fadingOut) {
+      // Already fading — return a promise that resolves with the existing fade
+      return new Promise<void>((resolve) => {
+        const prev = this.fadeResolve;
+        this.fadeResolve = () => { prev?.(); resolve(); };
+      });
+    }
     this.fadingOut = true;
     this.fadeTimer = FADE_OUT_DURATION;
     return new Promise<void>((resolve) => {
@@ -719,7 +726,7 @@ export class AgentSprite {
     const spd = this.animState === 'sleeping' ? SLEEPING_BOB_SPEED
       : this.animState === 'done' ? DONE_BOB_SPEED
       : BOB_SPEED;
-    this.bobTimer += (dt / 1000) * spd * Math.PI * 2;
+    this.bobTimer = (this.bobTimer + (dt / 1000) * spd * Math.PI * 2) % (Math.PI * 2);
     this.container.y = this.baseY + Math.sin(this.bobTimer) * amp;
   }
 

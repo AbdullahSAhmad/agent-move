@@ -47,8 +47,7 @@ export const TOOL_ZONE_MAP: Record<string, ZoneId> = {
 
 /** Get the zone for a tool, defaulting to 'thinking' for unknown tools */
 export function getZoneForTool(toolName: string): ZoneId {
-  // Handle MCP tools with varying names
-  if (toolName.startsWith('mcp__chrome')) return 'web';
+  // Handle MCP tools with varying names — all route to web zone
   if (toolName.startsWith('mcp__')) return 'web';
   return TOOL_ZONE_MAP[toolName] ?? 'thinking';
 }

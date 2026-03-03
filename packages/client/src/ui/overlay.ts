@@ -19,6 +19,8 @@ export class Overlay {
   private onAgentClick: ((agentId: string) => void) | null = null;
   private currentFilter: FilterMode = 'all';
   private collapsedGroups = new Set<string>();
+  private renderPending = false;
+  private scheduleRender: () => void;
 
   // Sparkline data: per-agent rolling token history (sampled every 2s, last 30 samples = 1min)
   private tokenHistory = new Map<string, TokenHistory>();
@@ -42,15 +44,24 @@ export class Overlay {
     // Listen for connection changes
     this.store.on('connection:status', (status) => this.updateConnectionStatus(status));
 
-    // Listen to agent events for immediate updates
-    this.store.on('agent:spawn', () => this.renderAgents());
-    this.store.on('agent:update', () => this.renderAgents());
-    this.store.on('agent:idle', () => this.renderAgents());
-    this.store.on('agent:shutdown', () => this.renderAgents());
-    this.store.on('state:reset', () => this.renderAgents());
+    // Listen to agent events — coalesce via requestAnimationFrame to avoid excessive DOM rebuilds
+    this.scheduleRender = () => {
+      if (!this.renderPending) {
+        this.renderPending = true;
+        requestAnimationFrame(() => {
+          this.renderPending = false;
+          this.renderAgents();
+        });
+      }
+    };
+    this.store.on('agent:spawn', this.scheduleRender);
+    this.store.on('agent:update', this.scheduleRender);
+    this.store.on('agent:idle', this.scheduleRender);
+    this.store.on('agent:shutdown', this.scheduleRender);
+    this.store.on('state:reset', this.scheduleRender);
 
     // Also refresh periodically for token count updates
-    this.refreshTimer = setInterval(() => this.renderAgents(), 500);
+    this.refreshTimer = setInterval(this.scheduleRender, 500);
 
     // Sample sparkline data every 2 seconds
     this.sparklineSampleTimer = setInterval(() => this.sampleSparklines(), 2000);
@@ -459,5 +470,10 @@ export class Overlay {
   dispose(): void {
     clearInterval(this.refreshTimer);
     clearInterval(this.sparklineSampleTimer);
+    this.store.off('agent:spawn', this.scheduleRender);
+    this.store.off('agent:update', this.scheduleRender);
+    this.store.off('agent:idle', this.scheduleRender);
+    this.store.off('agent:shutdown', this.scheduleRender);
+    this.store.off('state:reset', this.scheduleRender);
   }
 }

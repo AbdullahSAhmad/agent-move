@@ -29,32 +29,45 @@ export class Broadcaster {
   addClient(ws: WebSocket) {
     this.clients.add(ws);
 
-    // Send full state snapshot on connect
-    const fullState: ServerMessage = {
-      type: 'full_state',
-      agents: this.stateManager.getAll(),
-      timestamp: Date.now(),
-    };
-    ws.send(JSON.stringify(fullState));
-
-    // Send timeline snapshot for replay
-    const timeline: ServerMessage = {
-      type: 'timeline:snapshot',
-      events: this.stateManager.getTimeline(),
-      timestamp: Date.now(),
-    };
-    ws.send(JSON.stringify(timeline));
-
     ws.on('close', () => {
       this.clients.delete(ws);
     });
+    ws.on('error', () => {
+      this.clients.delete(ws);
+    });
+
+    // Send full state snapshot on connect
+    if (ws.readyState === 1) {
+      try {
+        const fullState: ServerMessage = {
+          type: 'full_state',
+          agents: this.stateManager.getAll(),
+          timestamp: Date.now(),
+        };
+        ws.send(JSON.stringify(fullState));
+
+        // Send timeline snapshot for replay
+        const timeline: ServerMessage = {
+          type: 'timeline:snapshot',
+          events: this.stateManager.getTimeline(),
+          timestamp: Date.now(),
+        };
+        ws.send(JSON.stringify(timeline));
+      } catch {
+        this.clients.delete(ws);
+      }
+    }
   }
 
   private broadcast(message: ServerMessage) {
     const data = JSON.stringify(message);
     for (const client of this.clients) {
       if (client.readyState === 1) { // OPEN
-        client.send(data);
+        try {
+          client.send(data);
+        } catch {
+          this.clients.delete(client);
+        }
       }
     }
   }

@@ -1,7 +1,7 @@
 import type { AgentState } from '@agent-move/shared';
 import { AGENT_PALETTES } from '@agent-move/shared';
 import type { StateStore } from '../connection/state-store.js';
-import { hexToCss } from '../utils/formatting.js';
+import { hexToCss, escapeHtml } from '../utils/formatting.js';
 
 /**
  * Toast Notification Manager — shows transient pop-up notifications
@@ -48,14 +48,14 @@ export class ToastManager {
     const name = this.getName(agent);
     const color = this.getColor(agent);
     const roleLabel = agent.role === 'main' ? '' : ` (${agent.role})`;
-    this.show(`<span class="toast-dot" style="background:${color}"></span> <strong>${this.esc(name)}</strong>${roleLabel} spawned`, 'spawn');
+    this.show(`<span class="toast-dot" style="background:${color}"></span> <strong>${escapeHtml(name)}</strong>${roleLabel} spawned`, 'spawn');
   }
 
   private onIdle(agent: AgentState): void {
     if (agent.isDone) {
       const name = this.getName(agent);
       const color = this.getColor(agent);
-      this.show(`<span class="toast-dot" style="background:${color}"></span> <strong>${this.esc(name)}</strong> finished`, 'done');
+      this.show(`<span class="toast-dot" style="background:${color}"></span> <strong>${escapeHtml(name)}</strong> finished`, 'done');
     }
   }
 
@@ -105,10 +105,6 @@ export class ToastManager {
     el.classList.add('toast-exit');
     el.addEventListener('animationend', () => el.remove(), { once: true });
     setTimeout(() => el.remove(), 400);
-  }
-
-  private esc(s: string): string {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   dispose(): void {

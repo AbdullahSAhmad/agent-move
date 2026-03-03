@@ -41,6 +41,7 @@ export class AnalyticsPanel {
   private tokenSamples: TokenSample[] = [];
   private costThreshold = 5.0; // dollars
   private thresholdAlerted = false;
+  private thresholdFocused = false;
   private alertEl: HTMLElement | null = null;
   /** Tool usage frequency tracker: toolName -> count */
   private toolCounts = new Map<string, number>();
@@ -303,12 +304,20 @@ export class AnalyticsPanel {
       </div>
     `;
 
-    // Bind threshold input
+    // Bind threshold input — only if not already focused (avoids disrupting user edits)
     const thresholdInput = content.querySelector('#cost-threshold') as HTMLInputElement;
-    thresholdInput?.addEventListener('change', () => {
-      this.costThreshold = parseFloat(thresholdInput.value) || 5.0;
-      this.thresholdAlerted = false;
-    });
+    if (thresholdInput) {
+      thresholdInput.addEventListener('change', () => {
+        this.costThreshold = parseFloat(thresholdInput.value) || 5.0;
+        this.thresholdAlerted = false;
+      });
+      // Preserve focus if the user was editing the threshold before this render
+      if (this.thresholdFocused) {
+        thresholdInput.focus();
+      }
+      thresholdInput.addEventListener('focus', () => { this.thresholdFocused = true; });
+      thresholdInput.addEventListener('blur', () => { this.thresholdFocused = false; });
+    }
   }
 
   private renderAgentBar(agent: AgentSnapshot, totalCost: number): string {
