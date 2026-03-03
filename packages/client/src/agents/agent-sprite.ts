@@ -98,6 +98,11 @@ export class AgentSprite {
   // Done sparkles
   private sparkles: { gfx: Graphics; phase: number }[] = [];
 
+  // Activity ring
+  private activityRing: Graphics;
+  private activityLevel = 0; // 0..1, decays over time
+  private activityPhase = 0; // rotation animation
+
   private spriteHeight: number;
   private textures: {
     idle: [Texture, Texture];
@@ -234,6 +239,11 @@ export class AgentSprite {
     }
     this.zzzContainer.position.set(this.spriteHeight / 3, -this.spriteHeight / 2);
     this.container.addChild(this.zzzContainer);
+
+    // Activity ring (drawn behind sprite)
+    this.activityRing = new Graphics();
+    this.activityRing.visible = false;
+    this.container.addChildAt(this.activityRing, 0);
 
     // Spawn animation
     this.spawnAnimTimer = AgentSprite.SPAWN_ANIM_DURATION;
@@ -483,6 +493,11 @@ export class AgentSprite {
       .stroke({ color: 0xfbbf24, width: 1, alpha: alpha * 0.7 });
   }
 
+  /** Bump activity level (called on each tool use) */
+  bumpActivity(): void {
+    this.activityLevel = Math.min(1, this.activityLevel + 0.35);
+  }
+
   /** Fade out and resolve when done */
   fadeOut(): Promise<void> {
     this.fadingOut = true;
@@ -595,6 +610,33 @@ export class AgentSprite {
           s.gfx.visible = false;
         }
       }
+    }
+
+    // Activity ring
+    this.activityLevel = Math.max(0, this.activityLevel - dt * 0.0004); // decay
+    if (this.activityLevel > 0.02 && !this.isDoneState) {
+      this.activityRing.visible = true;
+      this.activityPhase += dt * 0.003;
+      this.activityRing.clear();
+      const radius = this.spriteHeight / 2 + 6;
+      const alpha = this.activityLevel * 0.6;
+      // Draw rotating arc segments
+      const arcLen = Math.PI * 0.4 + this.activityLevel * Math.PI * 0.8;
+      for (let i = 0; i < 2; i++) {
+        const start = this.activityPhase + i * Math.PI;
+        this.activityRing.arc(0, 0, radius, start, start + arcLen)
+          .stroke({ color: 0x4ade80, width: 2, alpha });
+      }
+      // Outer glow
+      if (this.activityLevel > 0.3) {
+        for (let i = 0; i < 2; i++) {
+          const start = this.activityPhase + i * Math.PI;
+          this.activityRing.arc(0, 0, radius + 2, start, start + arcLen * 0.8)
+            .stroke({ color: 0x4ade80, width: 3, alpha: alpha * 0.25 });
+        }
+      }
+    } else {
+      this.activityRing.visible = false;
     }
 
     // Planning badge pulse

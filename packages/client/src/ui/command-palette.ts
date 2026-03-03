@@ -152,6 +152,30 @@ export class CommandPalette {
       category: 'feature',
       action: () => this.onCommand('timeline-live'),
     });
+    this.actions.push({
+      id: 'feature:shortcuts',
+      label: 'Keyboard Shortcuts',
+      description: 'Show all keyboard shortcuts (?)',
+      icon: '⌨',
+      category: 'feature',
+      action: () => this.onCommand('toggle-shortcuts'),
+    });
+    this.actions.push({
+      id: 'feature:focus',
+      label: 'Toggle Focus Mode',
+      description: 'Camera follows selected agent (F)',
+      icon: '🎯',
+      category: 'feature',
+      action: () => this.onCommand('toggle-focus'),
+    });
+    this.actions.push({
+      id: 'feature:export',
+      label: 'Export Session Summary',
+      description: 'Generate session report (E)',
+      icon: '📋',
+      category: 'feature',
+      action: () => this.onCommand('session-export'),
+    });
   }
 
   /** Dynamically add agent-specific actions */

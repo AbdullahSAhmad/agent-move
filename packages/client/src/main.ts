@@ -12,6 +12,11 @@ import { ZoneHeatmap } from './ui/zone-heatmap.js';
 import { CommandPalette } from './ui/command-palette.js';
 import { AnalyticsPanel } from './ui/analytics-panel.js';
 import { LayoutEditor, applySavedLayout } from './ui/layout-editor.js';
+import { StatsHud } from './ui/stats-hud.js';
+import { ToastManager } from './ui/toast-manager.js';
+import { ShortcutsHelp } from './ui/shortcuts-help.js';
+import { SessionExport } from './ui/session-export.js';
+import { Onboarding } from './ui/onboarding.js';
 import { ZONE_MAP } from '@agentflow/shared';
 
 async function main() {
@@ -62,6 +67,24 @@ async function main() {
   // ── Feature 3: Analytics Panel ──
   const analytics = new AnalyticsPanel(store);
 
+  // ── Stats HUD ──
+  const statsHud = new StatsHud(store);
+
+  // ── Toast Notifications ──
+  const toasts = new ToastManager(store);
+
+  // ── Keyboard Shortcuts Help ──
+  const shortcutsHelp = new ShortcutsHelp();
+
+  // ── Session Export ──
+  const sessionExport = new SessionExport(store);
+
+  // ── Onboarding (first-time users) ──
+  const onboarding = new Onboarding();
+
+  // ── Focus Mode ──
+  let focusModeActive = false;
+
   // ── Feature 2: Command Palette ──
   const commandPalette = new CommandPalette(store, (action, payload) => {
     switch (action) {
@@ -77,6 +100,9 @@ async function main() {
       }
       case 'focus-agent': {
         detailPanel.open(payload);
+        // Also activate focus mode on this agent
+        agentManager.setFocusAgent(payload);
+        focusModeActive = true;
         break;
       }
       case 'reset-camera':
@@ -104,6 +130,16 @@ async function main() {
         break;
       case 'timeline-live':
         // Timeline handles its own live mode
+        break;
+      case 'toggle-shortcuts':
+        shortcutsHelp.toggle();
+        break;
+      case 'toggle-focus':
+        focusModeActive = !focusModeActive;
+        if (!focusModeActive) agentManager.setFocusAgent(null);
+        break;
+      case 'session-export':
+        sessionExport.toggle();
         break;
     }
   });
@@ -154,6 +190,46 @@ async function main() {
     notifications.requestPermission();
   }, { once: true });
 
+  // ── Global keyboard shortcuts ──
+  document.addEventListener('keydown', (e) => {
+    // Skip if typing in an input
+    const tag = (e.target as HTMLElement)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    // Skip if modifier keys (Ctrl+K handled by command palette)
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    switch (e.key) {
+      case 'a':
+        analytics.toggle();
+        break;
+      case 'h':
+        heatmapVisible = !heatmapVisible;
+        const heatmapEl = document.getElementById('zone-heatmap');
+        if (heatmapEl) heatmapEl.style.display = heatmapVisible ? 'block' : 'none';
+        break;
+      case 'm':
+        sound.init();
+        sound.muted = !sound.muted;
+        muteBtn.textContent = sound.muted ? '\u{1F507}' : '\u{1F508}';
+        muteBtn.classList.toggle('muted', sound.muted);
+        break;
+      case 'f':
+        focusModeActive = !focusModeActive;
+        if (!focusModeActive) agentManager.setFocusAgent(null);
+        break;
+      case 'e':
+        sessionExport.toggle();
+        break;
+      case 'Escape':
+        // Escape also exits focus mode
+        if (focusModeActive) {
+          focusModeActive = false;
+          agentManager.setFocusAgent(null);
+        }
+        break;
+    }
+  });
+
   // Game loop
   pixiApp.ticker.add(() => {
     agentManager.update(pixiApp.ticker.deltaMS);
@@ -166,6 +242,14 @@ async function main() {
 
     // Update layout editor overlay position to match camera
     layoutEditor.updateTransform(root.x, root.y, root.scale.x);
+
+    // Focus mode: smoothly follow agent
+    if (focusModeActive) {
+      const pos = agentManager.getFocusedAgentPosition();
+      if (pos) {
+        world.camera.smoothFollow(pos.x, pos.y);
+      }
+    }
   });
 
   console.log('Claude Code Visualizer started');

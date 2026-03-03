@@ -6,6 +6,7 @@ import type { WorldManager } from '../world/world-manager.js';
 import { AgentSprite, type SpeechMessage } from './agent-sprite.js';
 import { RelationshipLines } from './relationship-lines.js';
 import { ParticleManager } from '../effects/particle-manager.js';
+import { MessageFlow } from '../effects/message-flow.js';
 import { ZoneGlow } from '../effects/zone-glow.js';
 import type { SoundManager } from '../audio/sound-manager.js';
 import type { NotificationManager } from '../audio/notification-manager.js';
@@ -41,9 +42,11 @@ export class AgentManager {
   private agents = new Map<string, ManagedAgent>();
   private lines: RelationshipLines;
   private particles: ParticleManager;
+  private messageFlow: MessageFlow;
   private zoneGlow: ZoneGlow;
   private sound: SoundManager | null = null;
   private notifications: NotificationManager | null = null;
+  private _focusedAgentId: string | null = null;
 
   setSoundManager(sound: SoundManager): void {
     this.sound = sound;
@@ -63,6 +66,9 @@ export class AgentManager {
 
     this.particles = new ParticleManager(app.renderer);
     this.world.addEffect(this.particles.container);
+
+    this.messageFlow = new MessageFlow();
+    this.world.addEffect(this.messageFlow.container);
 
     this.zoneGlow = new ZoneGlow();
 
@@ -217,6 +223,35 @@ export class AgentManager {
       const palette = AGENT_PALETTES[agent.colorIndex % AGENT_PALETTES.length];
       this.particles.emit(managed.sprite.container.x, managed.sprite.container.y, palette.body);
       this.sound?.play('tool-use');
+
+      // Message flow animation for SendMessage
+      if (agent.currentTool === 'SendMessage' && agent.parentId) {
+        const target = this.agents.get(agent.parentId);
+        if (target) {
+          this.messageFlow.send(
+            managed.sprite.container.x, managed.sprite.container.y,
+            target.sprite.container.x, target.sprite.container.y,
+            palette.body,
+          );
+        }
+      }
+      // Also trigger for parent -> child messages
+      if (agent.currentTool === 'SendMessage') {
+        for (const [, other] of this.agents) {
+          if (other.state.parentId === agent.id) {
+            const agentPalette = AGENT_PALETTES[agent.colorIndex % AGENT_PALETTES.length];
+            this.messageFlow.send(
+              managed.sprite.container.x, managed.sprite.container.y,
+              other.sprite.container.x, other.sprite.container.y,
+              agentPalette.body,
+            );
+            break; // send to first child as visual indicator
+          }
+        }
+      }
+
+      // Update activity ring
+      managed.sprite.bumpActivity();
     }
 
     // Play zone change sound if zone changed
@@ -345,8 +380,9 @@ export class AgentManager {
       managed.sprite.update(deltaMs);
     }
 
-    // Update particles
+    // Update particles & message flow
     this.particles.update(deltaMs);
+    this.messageFlow.update(deltaMs);
 
     // Update relationship lines
     const lineData = new Map<string, { x: number; y: number; parentId: string | null; teamName: string | null; colorIndex: number }>();
@@ -374,5 +410,28 @@ export class AgentManager {
     }
 
     this.world.update(deltaMs);
+  }
+
+  /** Set or clear the focused agent for camera follow mode */
+  setFocusAgent(agentId: string | null): void {
+    this._focusedAgentId = agentId;
+  }
+
+  get focusedAgentId(): string | null {
+    return this._focusedAgentId;
+  }
+
+  /** Get world position of the focused agent (if any) */
+  getFocusedAgentPosition(): { x: number; y: number } | null {
+    if (!this._focusedAgentId) return null;
+    const managed = this.agents.get(this._focusedAgentId);
+    if (!managed) {
+      this._focusedAgentId = null;
+      return null;
+    }
+    return {
+      x: managed.sprite.container.x,
+      y: managed.sprite.container.y,
+    };
   }
 }

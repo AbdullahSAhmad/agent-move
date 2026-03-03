@@ -104,6 +104,19 @@ export class Camera {
     );
   }
 
+  /** Smoothly follow a world coordinate (call each frame) */
+  smoothFollow(worldX: number, worldY: number, lerp = 0.05): void {
+    const screenW = this.app.screen.width;
+    const screenH = this.app.screen.height;
+    const sidebarW = 300;
+    const cx = (screenW - sidebarW) / 2;
+    const cy = screenH / 2;
+    const targetPosX = cx - worldX * this.zoom;
+    const targetPosY = cy - worldY * this.zoom;
+    this.world.position.x += (targetPosX - this.world.position.x) * lerp;
+    this.world.position.y += (targetPosY - this.world.position.y) * lerp;
+  }
+
   /** Pan camera to center on a world coordinate */
   panTo(worldX: number, worldY: number): void {
     const screenW = this.app.screen.width;
