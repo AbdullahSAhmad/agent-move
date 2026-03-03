@@ -77,15 +77,27 @@ class ClaudePaths {
    */
   private resolveToFolderName(encoded: string): string | null {
     try {
-      // Extract drive letter: C-- → C:/
-      const driveMatch = encoded.match(/^([A-Za-z])--(.*)/);
-      if (!driveMatch) return null;
+      let root: string;
+      let rest: string;
 
-      const drive = driveMatch[1] + ':/';
-      const rest = driveMatch[2];
+      // Windows: drive letter encoding e.g. "C--projects-foo"  → C:/
+      const driveMatch = encoded.match(/^([A-Za-z])--(.*)/);
+      // Unix: root slash encoding e.g. "-Users-john-foo"  → /
+      const unixMatch = !driveMatch && encoded.match(/^-(.*)/);
+
+      if (driveMatch) {
+        root = driveMatch[1] + ':/';
+        rest = driveMatch[2];
+      } else if (unixMatch) {
+        root = '/';
+        rest = unixMatch[1];
+      } else {
+        return null;
+      }
+
       const parts = rest.split('-').filter(Boolean);
 
-      let currentPath = drive;
+      let currentPath = root;
       let lastName = '';
       let i = 0;
 
