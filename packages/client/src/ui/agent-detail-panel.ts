@@ -23,6 +23,7 @@ export class AgentDetailPanel {
       <div class="detail-header">
         <button id="detail-close">&times;</button>
         <div id="detail-name"></div>
+        <div id="detail-task"></div>
         <div id="detail-meta"></div>
       </div>
       <div id="detail-stats"></div>
@@ -90,6 +91,15 @@ export class AgentDetailPanel {
 
     const nameEl = this.panelEl.querySelector('#detail-name')!;
     nameEl.innerHTML = `<span style="color:${borderColor}">\u25CF</span> ${this.esc(name)} <span class="detail-role">${agent.role.toUpperCase()}</span>`;
+
+    // Task description
+    const taskEl = this.panelEl.querySelector('#detail-task')!;
+    if (agent.taskDescription) {
+      taskEl.innerHTML = `<div class="detail-task-text">${this.esc(agent.taskDescription)}</div>`;
+      taskEl.style.display = '';
+    } else {
+      taskEl.style.display = 'none';
+    }
 
     const metaEl = this.panelEl.querySelector('#detail-meta')!;
 
