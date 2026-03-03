@@ -1,6 +1,6 @@
 {
   "name": "agent-move",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Watch your AI coding agents come alive as pixel-art characters in a 2D world",
   "license": "MIT",
   "bin": {
