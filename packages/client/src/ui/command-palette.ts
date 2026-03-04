@@ -177,6 +177,56 @@ export class CommandPalette {
       category: 'feature',
       action: () => this.onCommand('session-export'),
     });
+
+    // New features
+    this.actions.push({
+      id: 'feature:trails',
+      label: 'Toggle Agent Trails',
+      description: 'Show movement trail dots (T)',
+      icon: '✨',
+      category: 'feature',
+      action: () => this.onCommand('toggle-trails'),
+    });
+    this.actions.push({
+      id: 'feature:daynight',
+      label: 'Toggle Day/Night Cycle',
+      description: 'Real-time lighting overlay (N)',
+      icon: '🌙',
+      category: 'feature',
+      action: () => this.onCommand('toggle-daynight'),
+    });
+    this.actions.push({
+      id: 'feature:minimap',
+      label: 'Toggle Mini-map',
+      description: 'Overview navigation map (Tab)',
+      icon: '🗺',
+      category: 'feature',
+      action: () => this.onCommand('toggle-minimap'),
+    });
+    this.actions.push({
+      id: 'feature:leaderboard',
+      label: 'Toggle Leaderboard',
+      description: 'Agent performance rankings (L)',
+      icon: '🏆',
+      category: 'feature',
+      action: () => this.onCommand('toggle-leaderboard'),
+    });
+    this.actions.push({
+      id: 'feature:isometric',
+      label: 'Toggle Isometric View',
+      description: '3D perspective transform (I)',
+      icon: '🔲',
+      category: 'feature',
+      action: () => this.onCommand('toggle-isometric'),
+    });
+    this.actions.push({
+      id: 'feature:theme',
+      label: 'Cycle Theme',
+      description: 'Switch between Office, Space, Castle, Cyberpunk',
+      icon: '🎨',
+      category: 'feature',
+      action: () => this.onCommand('cycle-theme'),
+    });
   }
 
   /** Dynamically add agent-specific actions */

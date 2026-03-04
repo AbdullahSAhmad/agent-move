@@ -46,8 +46,17 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     title: 'Timeline',
     shortcuts: [
       { keys: 'Space', description: 'Play / pause timeline replay' },
-      { keys: 'L', description: 'Jump to live mode' },
-      { keys: 'T', description: 'Toggle expanded timeline' },
+    ],
+  },
+  {
+    title: 'New Features',
+    shortcuts: [
+      { keys: 'T', description: 'Toggle agent trails' },
+      { keys: 'N', description: 'Toggle day/night cycle' },
+      { keys: 'Tab', description: 'Toggle mini-map' },
+      { keys: 'L', description: 'Toggle leaderboard' },
+      { keys: 'I', description: 'Toggle isometric view' },
+      { keys: 'P', description: 'Cycle theme' },
     ],
   },
 ];

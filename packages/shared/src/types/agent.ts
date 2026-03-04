@@ -35,6 +35,14 @@ export interface AgentState {
   cacheCreationTokens: number;
   model: string | null;
   colorIndex: number;
+  /** Total number of tool_use events processed (for leaderboard) */
+  toolUseCount: number;
+  /** Current git branch for the agent's project */
+  gitBranch: string | null;
+  /** Last N file paths touched by the agent */
+  recentFiles: string[];
+  /** Recent Edit diffs (newest first, max 10) */
+  recentDiffs: Array<{ filePath: string; oldText: string; newText: string; timestamp: number }>;
 }
 
 export interface AgentEvent {
@@ -52,6 +60,8 @@ export interface ActivityEntry {
   tool?: string;
   toolArgs?: string; // truncated summary of tool input
   text?: string;
+  /** Diff data from Edit tool calls */
+  diff?: { filePath: string; oldText: string; newText: string };
   inputTokens?: number;
   outputTokens?: number;
 }

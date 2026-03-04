@@ -4,6 +4,9 @@ import type { ZoneId, ZoneConfig } from '@agent-move/shared';
 import { createGrid } from './grid.js';
 import { ZoneRenderer } from './zone-renderer.js';
 import { Camera } from './camera.js';
+import { DayNightCycle } from '../effects/day-night-cycle.js';
+import { IsometricView } from './isometric.js';
+import type { Theme } from './themes/theme-types.js';
 
 /**
  * Layered scene management.
@@ -19,8 +22,12 @@ export class WorldManager {
 
   public readonly zoneRenderer: ZoneRenderer;
   public readonly camera: Camera;
+  public readonly dayNight: DayNightCycle;
+  public readonly isometric: IsometricView;
+  private app: Application;
 
   constructor(app: Application) {
+    this.app = app;
     // Build grid
     const grid = createGrid();
     this.gridLayer.addChild(grid);
@@ -36,11 +43,18 @@ export class WorldManager {
     this.root.addChild(this.effectLayer);
     this.root.addChild(this.uiLayer);
 
+    // Day/night overlay (topmost, click-through)
+    this.dayNight = new DayNightCycle(WORLD_WIDTH, WORLD_HEIGHT);
+    this.root.addChild(this.dayNight.overlay);
+
     // Add root to stage
     app.stage.addChild(this.root);
 
     // Set up camera
     this.camera = new Camera(app, this.root);
+
+    // Isometric view
+    this.isometric = new IsometricView();
 
     // Auto-fit to viewport
     this.camera.resetView(WORLD_WIDTH, WORLD_HEIGHT);
@@ -100,9 +114,21 @@ export class WorldManager {
     this.zoneRenderer.rebuild();
   }
 
+  /** Apply a theme's decorators and background color */
+  applyTheme(theme: Theme): void {
+    this.zoneRenderer.setThemeDecorators(theme.decorators);
+    this.app.renderer.background.color = theme.colors.background;
+  }
+
+  /** Toggle isometric view */
+  toggleIsometric(): void {
+    this.isometric.toggle(this.root);
+  }
+
   /** Per-frame update */
   update(dt: number): void {
     this.zoneRenderer.update(dt);
+    this.dayNight.update(dt);
   }
 
   get worldWidth(): number { return WORLD_WIDTH; }

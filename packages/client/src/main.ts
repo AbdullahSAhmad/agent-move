@@ -17,7 +17,15 @@ import { ToastManager } from './ui/toast-manager.js';
 import { ShortcutsHelp } from './ui/shortcuts-help.js';
 import { SessionExport } from './ui/session-export.js';
 import { Onboarding } from './ui/onboarding.js';
-import { ZONE_MAP } from '@agent-move/shared';
+import { ZONE_MAP, AGENT_PALETTES } from '@agent-move/shared';
+
+// New feature imports
+import { AgentTrails } from './effects/agent-trails.js';
+import { Minimap } from './ui/minimap.js';
+import { LeaderboardPanel } from './ui/leaderboard-panel.js';
+import { AgentCustomizer } from './ui/agent-customizer.js';
+
+import { ThemeManager } from './world/themes/theme-manager.js';
 
 async function main() {
   const appEl = document.getElementById('app')!;
@@ -59,6 +67,14 @@ async function main() {
     updateFocusIndicator();
   });
 
+  // ── Feature 1: Agent Click-to-Inspect ──
+  agentManager.setClickHandler((agentId) => {
+    detailPanel.open(agentId);
+    agentManager.setFocusAgent(agentId);
+    focusModeActive = true;
+    updateFocusIndicator();
+  });
+
   // Init timeline
   const timeline = new Timeline(store);
   timeline.setReplayCallback((agents) => {
@@ -86,6 +102,57 @@ async function main() {
 
   // ── Onboarding (first-time users) ──
   const onboarding = new Onboarding();
+
+  // ── Feature 2: Agent Trails ──
+  const trails = new AgentTrails();
+  world.addEffect(trails.container);
+
+  // ── Feature 4: Mini-map ──
+  const minimap = new Minimap(world.camera, (wx, wy) => {
+    world.camera.panTo(wx, wy);
+  });
+
+  // ── Feature 5: Agent Performance Leaderboard ──
+  const leaderboard = new LeaderboardPanel(store);
+
+  // ── Feature 6: Agent Customization ──
+  const customizer = new AgentCustomizer();
+  const custLookup = (key: string) => customizer.getCustomization(key);
+  agentManager.setCustomizationLookup(custLookup);
+  detailPanel.setCustomizationLookup(custLookup);
+  overlay.setCustomizationLookup(custLookup);
+  customizer.setChangeHandler((agentId, _stableKey, data) => {
+    agentManager.applyCustomization(agentId, data.displayName, data.colorIndex);
+    if (detailPanel.currentAgentId === agentId) {
+      detailPanel.refreshHeader(data.displayName);
+    }
+  });
+  // Wire detail panel "Customize" button to open customizer
+  detailPanel.setCustomizeHandler((agentId, name) => {
+    customizer.open(agentId, name);
+  });
+  // Wire right-click on agent sprites to open customizer
+  pixiApp.canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault(); // prevent browser context menu on canvas
+  });
+
+  // ── Feature 9: Custom Themes ──
+  const themeManager = new ThemeManager();
+  // Apply initial theme
+  world.applyTheme(themeManager.current);
+
+  // Theme cycle button in zoom controls row
+  const themeBtn = document.createElement('button');
+  themeBtn.id = 'theme-cycle-btn';
+  themeBtn.title = `Theme: ${themeManager.current.name} (P)`;
+  themeBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-1 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>`;
+  document.getElementById('zoom-controls')!.appendChild(themeBtn);
+  themeBtn.addEventListener('click', () => themeManager.cycleNext());
+
+  themeManager.onChange((theme) => {
+    world.applyTheme(theme);
+    themeBtn.title = `Theme: ${theme.name} (P)`;
+  });
 
   // ── Focus Mode ──
   let focusModeActive = false;
@@ -168,7 +235,30 @@ async function main() {
       case 'session-export':
         sessionExport.toggle();
         break;
+      case 'toggle-trails':
+        trails.toggle();
+        break;
+      case 'toggle-daynight':
+        world.dayNight.toggle();
+        break;
+      case 'toggle-minimap':
+        minimap.toggle();
+        break;
+      case 'toggle-leaderboard':
+        leaderboard.toggle();
+        break;
+      case 'toggle-isometric':
+        world.toggleIsometric();
+        break;
+      case 'cycle-theme':
+        themeManager.cycleNext();
+        break;
     }
+  });
+
+  // Clean up trails when agents shut down
+  store.on('agent:shutdown', (agentId: string) => {
+    trails.removeAgent(agentId);
   });
 
   // Connect WebSocket
@@ -242,11 +332,9 @@ async function main() {
         break;
       case 'f':
         if (!focusModeActive) {
-          // First press: activate and pick first active agent
           agentManager.cycleNextAgent();
           focusModeActive = !!agentManager.focusedAgentId;
         } else {
-          // Subsequent presses: cycle to next agent
           const next = agentManager.cycleNextAgent();
           if (!next) {
             focusModeActive = false;
@@ -259,19 +347,39 @@ async function main() {
         sessionExport.toggle();
         break;
       case 'Escape':
-        // Escape also exits focus mode
         if (focusModeActive) {
           focusModeActive = false;
           agentManager.setFocusAgent(null);
           updateFocusIndicator();
         }
         break;
+      // New feature shortcuts
+      case 't':
+        trails.toggle();
+        break;
+      case 'n':
+        world.dayNight.toggle();
+        break;
+      case 'Tab':
+        e.preventDefault();
+        minimap.toggle();
+        break;
+      case 'l':
+        leaderboard.toggle();
+        break;
+      case 'i':
+        world.toggleIsometric();
+        break;
+      case 'p':
+        themeManager.cycleNext();
+        break;
     }
   });
 
   // Game loop
   pixiApp.ticker.add(() => {
-    agentManager.update(pixiApp.ticker.deltaMS);
+    const dt = pixiApp.ticker.deltaMS;
+    agentManager.update(dt);
 
     // Update heatmap overlay position to match camera
     const root = world.root;
@@ -288,6 +396,24 @@ async function main() {
       if (pos) {
         world.camera.smoothFollow(pos.x, pos.y);
       }
+    }
+
+    // Update agent trails
+    if (trails.enabled) {
+      const colorMap = new Map<string, number>();
+      for (const p of agentManager.getAgentPositions()) {
+        const palette = AGENT_PALETTES[p.colorIndex % AGENT_PALETTES.length];
+        colorMap.set(p.id, palette.body);
+        trails.recordPosition(p.id, p.x, p.y, dt, palette.body);
+      }
+      trails.update(dt, colorMap);
+    }
+
+    // Update minimap
+    if (minimap.visible) {
+      const viewport = world.camera.getViewport();
+      const agents = agentManager.getAgentPositions();
+      minimap.render(agents, viewport);
     }
   });
 

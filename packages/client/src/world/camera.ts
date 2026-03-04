@@ -117,6 +117,19 @@ export class Camera {
     this.world.position.y += (targetPosY - this.world.position.y) * lerp;
   }
 
+  /** Get the currently visible viewport in world coordinates */
+  getViewport(): { x: number; y: number; width: number; height: number; zoom: number } {
+    const screenW = this.app.screen.width;
+    const screenH = this.app.screen.height;
+    return {
+      x: -this.world.position.x / this.zoom,
+      y: -this.world.position.y / this.zoom,
+      width: screenW / this.zoom,
+      height: screenH / this.zoom,
+      zoom: this.zoom,
+    };
+  }
+
   /** Pan camera to center on a world coordinate */
   panTo(worldX: number, worldY: number): void {
     const screenW = this.app.screen.width;

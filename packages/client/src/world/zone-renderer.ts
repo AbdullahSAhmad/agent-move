@@ -2,6 +2,7 @@ import { Container, Graphics, Text, TextStyle } from 'pixi.js';
 import { ZONES } from '@agent-move/shared';
 import type { ZoneConfig, ZoneId } from '@agent-move/shared';
 import { ZONE_DECORATORS } from './furniture.js';
+import type { ZoneDecoratorFn } from './themes/theme-types.js';
 
 interface ZoneDisplay {
   container: Container;
@@ -22,6 +23,13 @@ const GLOW_WIDTH_ACTIVE = 3;
 export class ZoneRenderer {
   private zones = new Map<ZoneId, ZoneDisplay>();
   public readonly container = new Container();
+  private themeDecorators: Record<string, ZoneDecoratorFn> | null = null;
+
+  /** Override decorators with a custom theme */
+  setThemeDecorators(decorators: Record<string, ZoneDecoratorFn>): void {
+    this.themeDecorators = decorators;
+    this.rebuild();
+  }
 
   constructor() {
     for (const zone of ZONES) {
@@ -67,7 +75,7 @@ export class ZoneRenderer {
 
   /** Draw the pixel-art room interior */
   private drawRoom(g: Graphics, config: ZoneConfig): void {
-    const decorator = ZONE_DECORATORS[config.id];
+    const decorator = this.themeDecorators?.[config.id] ?? ZONE_DECORATORS[config.id];
     if (decorator) {
       decorator(g, 0, 0, config.width, config.height);
     } else {

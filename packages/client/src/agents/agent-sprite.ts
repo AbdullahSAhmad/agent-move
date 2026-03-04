@@ -103,6 +103,7 @@ export class AgentSprite {
   private activityLevel = 0; // 0..1, decays over time
   private activityPhase = 0; // rotation animation
 
+  private isSubagent: boolean;
   private spriteHeight: number;
   private textures: {
     idle: [Texture, Texture];
@@ -136,7 +137,8 @@ export class AgentSprite {
     palette: AgentPalette,
     renderer: any,
   ) {
-    const isSubagent = agent.role === 'subagent';
+    this.isSubagent = agent.role === 'subagent';
+    const isSubagent = this.isSubagent;
     const spriteSet: SpriteSet = isSubagent ? SUB_SPRITES : MAIN_SPRITES;
     const keyPrefix = isSubagent ? 'sub' : 'main';
     const ci = agent.colorIndex;
@@ -245,6 +247,18 @@ export class AgentSprite {
     this.activityRing.visible = false;
     this.container.addChildAt(this.activityRing, 0);
 
+    // Make clickable
+    this.container.eventMode = 'static';
+    this.container.cursor = 'pointer';
+    this.container.hitArea = {
+      contains: (x: number, y: number) => {
+        const halfW = this.spriteHeight / 2 + 10;
+        const top = -this.spriteHeight / 2 - 10;
+        const bottom = this.spriteHeight / 2 + 25; // include name label
+        return x >= -halfW && x <= halfW && y >= top && y <= bottom;
+      },
+    };
+
     // Spawn animation
     this.spawnAnimTimer = AgentSprite.SPAWN_ANIM_DURATION;
     this.container.scale.set(0.3);
@@ -339,7 +353,6 @@ export class AgentSprite {
     this.speechBubble.alpha = 1;
   }
 
-  /** Set idle visual state */
   /** Update the displayed name label (e.g. when agentName is discovered after spawn) */
   updateName(agent: AgentState): void {
     const rawName = agent.agentName || agent.projectName || agent.id.slice(0, 8);
@@ -347,6 +360,40 @@ export class AgentSprite {
     if (this.nameLabel.text !== name) {
       this.nameLabel.text = name;
     }
+  }
+
+  /** Override the displayed name with a custom one */
+  setCustomName(name: string): void {
+    const display = name.length > 14 ? name.slice(0, 12) + '..' : name;
+    this.nameLabel.text = display;
+  }
+
+  /** Rebuild all sprite textures with a new palette (for color customization) */
+  rebuildTextures(palette: AgentPalette, colorIndex: number, renderer: any): void {
+    const spriteSet: SpriteSet = this.isSubagent ? SUB_SPRITES : MAIN_SPRITES;
+    const keyPrefix = this.isSubagent ? 'sub' : 'main';
+    // Use a custom prefix to avoid colliding with shared cache entries
+    const ci = colorIndex;
+
+    this.textures = {
+      idle: [
+        createSpriteTexture(renderer, spriteSet.idle[0], palette, spriteKey(`${keyPrefix}_idle0`, ci)),
+        createSpriteTexture(renderer, spriteSet.idle[1], palette, spriteKey(`${keyPrefix}_idle1`, ci)),
+      ],
+      walk: [
+        createSpriteTexture(renderer, spriteSet.walk[0], palette, spriteKey(`${keyPrefix}_walk0`, ci)),
+        createSpriteTexture(renderer, spriteSet.walk[1], palette, spriteKey(`${keyPrefix}_walk1`, ci)),
+      ],
+      working: createSpriteTexture(renderer, spriteSet.working, palette, spriteKey(`${keyPrefix}_working`, ci)),
+      sleeping: [
+        createSpriteTexture(renderer, spriteSet.sleeping[0], palette, spriteKey(`${keyPrefix}_sleeping0`, ci)),
+        createSpriteTexture(renderer, spriteSet.sleeping[1], palette, spriteKey(`${keyPrefix}_sleeping1`, ci)),
+      ],
+      done: createSpriteTexture(renderer, spriteSet.done, palette, spriteKey(`${keyPrefix}_done`, ci)),
+    };
+
+    // Apply the current animation frame's texture immediately
+    this.sprite.texture = this.textures.idle[0];
   }
 
   setIdle(idle: boolean): void {
@@ -733,6 +780,22 @@ export class AgentSprite {
       : BOB_SPEED;
     this.bobTimer = (this.bobTimer + (dt / 1000) * spd * Math.PI * 2) % (Math.PI * 2);
     this.container.y = this.baseY + Math.sin(this.bobTimer) * amp;
+  }
+
+  /** Register a click handler on this sprite */
+  onClick(handler: () => void): void {
+    this.container.on('pointertap', handler);
+  }
+
+  /** Register hover handlers */
+  onHover(enter: () => void, leave: () => void): void {
+    this.container.on('pointerover', enter);
+    this.container.on('pointerout', leave);
+  }
+
+  /** Get current world position */
+  getPosition(): { x: number; y: number } {
+    return { x: this.container.x, y: this.container.y };
   }
 
   destroy(): void {

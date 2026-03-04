@@ -4,6 +4,7 @@ import { getZoneForTool } from '@agent-move/shared';
 import { config } from '../config.js';
 import type { ParsedActivity } from '../watcher/jsonl-parser.js';
 import type { SessionInfo } from '../watcher/claude-paths.js';
+import { getGitBranch } from '../watcher/git-info.js';
 
 const MAX_HISTORY_PER_AGENT = 500;
 const MAX_HISTORY_AGE_MS = 30 * 60 * 1000; // 30 minutes
@@ -383,6 +384,10 @@ export class AgentStateManager extends EventEmitter {
         cacheCreationTokens: 0,
         model: activity.model ?? null,
         colorIndex: this.colorCounter++ % 12,
+        toolUseCount: 0,
+        gitBranch: null,
+        recentFiles: [],
+        recentDiffs: [],
       };
       this.agents.set(sessionId, agent);
       this.sessionToAgent.set(sessionId, sessionId);
@@ -462,6 +467,21 @@ export class AgentStateManager extends EventEmitter {
         agent.currentTool = activity.toolName ?? null;
         agent.currentActivity = this.summarizeToolInput(activity.toolInput) || null;
         agent.currentZone = getZoneForTool(activity.toolName ?? '');
+        agent.toolUseCount++;
+
+        // Update git branch (getGitBranch has its own 30s cache)
+        if (agent.projectPath) {
+          agent.gitBranch = getGitBranch(agent.projectPath);
+        }
+
+        // Extract file paths from file-related tools
+        if (activity.toolInput) {
+          const input = activity.toolInput as Record<string, unknown>;
+          const filePath = input.file_path as string | undefined;
+          if (filePath) {
+            agent.recentFiles = [filePath, ...agent.recentFiles.filter(f => f !== filePath)].slice(0, 10);
+          }
+        }
 
         if (activity.toolName === 'EnterPlanMode') {
           agent.isPlanning = true;
@@ -515,12 +535,35 @@ export class AgentStateManager extends EventEmitter {
           }
         }
 
+        // Capture diff from Edit tool
+        let diffData: { filePath: string; oldText: string; newText: string } | undefined;
+        if (activity.toolName === 'Edit' && activity.toolInput) {
+          const input = activity.toolInput as Record<string, unknown>;
+          const fp = (input.file_path as string) ?? '';
+          const oldStr = (input.old_string as string) ?? '';
+          const newStr = (input.new_string as string) ?? '';
+          if (fp && (oldStr || newStr)) {
+            diffData = {
+              filePath: fp,
+              oldText: oldStr.length > 500 ? oldStr.slice(0, 500) + '...' : oldStr,
+              newText: newStr.length > 500 ? newStr.slice(0, 500) + '...' : newStr,
+            };
+          }
+        }
+
+        // Accumulate recent diffs (newest first, max 10)
+        if (diffData) {
+          agent.recentDiffs.unshift({ ...diffData, timestamp: now });
+          if (agent.recentDiffs.length > 10) agent.recentDiffs.pop();
+        }
+
         this.addHistory(agentId, {
           timestamp: now,
           kind: 'tool',
           tool: activity.toolName ?? undefined,
           toolArgs: this.summarizeToolInput(activity.toolInput),
           zone: agent.currentZone,
+          diff: diffData,
         });
 
         if (prevZone !== agent.currentZone) {

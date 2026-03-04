@@ -17,6 +17,7 @@ export class Overlay {
   private filterEl: HTMLElement;
   private refreshTimer: ReturnType<typeof setInterval>;
   private onAgentClick: ((agentId: string) => void) | null = null;
+  private _customizationLookup: ((stableKey: string) => { displayName?: string; colorIndex?: number } | undefined) | null = null;
   private currentFilter: FilterMode = 'all';
   private collapsedGroups = new Set<string>();
   private renderPending = false;
@@ -28,6 +29,10 @@ export class Overlay {
 
   setAgentClickHandler(handler: (agentId: string) => void): void {
     this.onAgentClick = handler;
+  }
+
+  setCustomizationLookup(lookup: (stableKey: string) => { displayName?: string; colorIndex?: number } | undefined): void {
+    this._customizationLookup = lookup;
   }
 
   constructor(store: StateStore) {
@@ -383,13 +388,15 @@ export class Overlay {
   }
 
   private renderCard(agent: AgentState, isChild = false, subCount = 0): string {
-    const palette = AGENT_PALETTES[agent.colorIndex % AGENT_PALETTES.length];
+    const stableKey = agent.agentName || agent.projectName || this.shortenId(agent.sessionId);
+    const customization = this._customizationLookup?.(stableKey);
+    const palette = AGENT_PALETTES[(customization?.colorIndex ?? agent.colorIndex) % AGENT_PALETTES.length];
     const borderColor = hexToCss(palette.body);
     const zone = ZONE_MAP.get(agent.currentZone);
     const zoneName = zone ? zone.label : agent.currentZone;
     const toolText = agent.currentTool ?? 'none';
     const tokens = formatTokenPair(agent.totalInputTokens, agent.totalOutputTokens);
-    const name = agent.agentName || agent.projectName || this.shortenId(agent.sessionId);
+    const name = customization?.displayName || stableKey;
     const opacity = agent.isDone ? '0.4' : agent.isIdle ? '0.6' : '1';
     const childClass = isChild ? ' agent-card-child' : '';
     const doneClass = agent.isDone ? ' agent-card-done' : '';

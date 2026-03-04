@@ -47,6 +47,9 @@ export class AgentManager {
   private sound: SoundManager | null = null;
   private notifications: NotificationManager | null = null;
   private _focusedAgentId: string | null = null;
+  private _onAgentClick: ((agentId: string) => void) | null = null;
+  private _onAgentHover: ((agentId: string | null, x: number, y: number) => void) | null = null;
+  private _customizationLookup: ((stableKey: string) => { displayName?: string; colorIndex?: number } | undefined) | null = null;
   private onSpawnBound: (agent: AgentState) => void;
   private onUpdateBound: (agent: AgentState) => void;
   private onIdleBound: (agent: AgentState) => void;
@@ -59,6 +62,40 @@ export class AgentManager {
 
   setNotificationManager(notifications: NotificationManager): void {
     this.notifications = notifications;
+  }
+
+  /** Set callback for when an agent sprite is clicked */
+  setClickHandler(handler: (agentId: string) => void): void {
+    this._onAgentClick = handler;
+  }
+
+  /** Set callback for hover enter/leave on agent sprites */
+  setHoverHandler(handler: (agentId: string | null, x: number, y: number) => void): void {
+    this._onAgentHover = handler;
+  }
+
+  /** Set a lookup function to resolve saved customizations by agent name */
+  setCustomizationLookup(lookup: (stableKey: string) => { displayName?: string; colorIndex?: number } | undefined): void {
+    this._customizationLookup = lookup;
+  }
+
+  /** Get the stable key used for customization persistence */
+  private getStableKey(agent: AgentState): string {
+    return agent.agentName || agent.projectName || agent.id.slice(0, 8);
+  }
+
+  /** Get the display name for an agent, respecting customizations */
+  getDisplayName(agent: AgentState): string {
+    const stableKey = this.getStableKey(agent);
+    const custom = this._customizationLookup?.(stableKey);
+    return custom?.displayName || stableKey;
+  }
+
+  /** Get the effective color index for an agent, respecting customizations */
+  getDisplayColorIndex(agent: AgentState): number {
+    const stableKey = this.getStableKey(agent);
+    const custom = this._customizationLookup?.(stableKey);
+    return custom?.colorIndex ?? agent.colorIndex;
   }
 
   constructor(
@@ -180,6 +217,22 @@ export class AgentManager {
       sprite.container.position.set(spawnPos.x, spawnPos.y);
     }
 
+    // Wire click and hover events
+    sprite.onClick(() => this._onAgentClick?.(agent.id));
+    sprite.onHover(
+      () => this._onAgentHover?.(agent.id, sprite.container.x, sprite.container.y),
+      () => this._onAgentHover?.(null, 0, 0),
+    );
+
+    // Apply saved customizations (persisted by agent name)
+    const displayName = this.getDisplayName(agent);
+    const displayColorIndex = this.getDisplayColorIndex(agent);
+    sprite.setCustomName(displayName);
+    if (displayColorIndex !== agent.colorIndex) {
+      const customPalette = AGENT_PALETTES[displayColorIndex % AGENT_PALETTES.length];
+      sprite.rebuildTextures(customPalette, displayColorIndex, this.app.renderer);
+    }
+
     this.agents.set(agent.id, { sprite, state: agent });
     this.world.addAgent(sprite.container);
 
@@ -189,7 +242,7 @@ export class AgentManager {
 
     this.updateChildBadges();
     this.sound?.play('spawn');
-    this.notifications?.notifySpawn(agent.agentName || agent.projectName || agent.id.slice(0, 8));
+    this.notifications?.notifySpawn(displayName);
   }
 
   private onUpdate(agent: AgentState): void {
@@ -202,8 +255,8 @@ export class AgentManager {
     const prevZone = managed.state.currentZone;
     managed.state = agent;
 
-    // Update name label if agentName was discovered
-    managed.sprite.updateName(agent);
+    // Update name label respecting customizations
+    managed.sprite.setCustomName(this.getDisplayName(agent));
 
     // Move to new zone with distributed position
     const target = this.getZonePosition(agent.currentZone, agent.id);
@@ -234,7 +287,7 @@ export class AgentManager {
 
     // Emit particles on tool use
     if (agent.currentTool) {
-      const palette = AGENT_PALETTES[agent.colorIndex % AGENT_PALETTES.length];
+      const palette = AGENT_PALETTES[this.getDisplayColorIndex(agent) % AGENT_PALETTES.length];
       this.particles.emit(managed.sprite.container.x, managed.sprite.container.y, palette.body);
       this.sound?.play('tool-use');
 
@@ -296,7 +349,7 @@ export class AgentManager {
     managed.sprite.clearSpeech();
 
     this.sound?.play('idle');
-    this.notifications?.notifyIdle(agent.agentName || agent.projectName || agent.id.slice(0, 8));
+    this.notifications?.notifyIdle(this.getDisplayName(agent));
   }
 
   private onShutdown(agentId: string): void {
@@ -304,7 +357,7 @@ export class AgentManager {
     if (!managed) return;
 
     this.sound?.play('shutdown');
-    this.notifications?.notifyShutdown(managed.state.agentName || managed.state.projectName || agentId.slice(0, 8));
+    this.notifications?.notifyShutdown(this.getDisplayName(managed.state));
 
     const spawnPos = this.world.getZoneCenter('spawn');
     managed.sprite.moveTo(spawnPos.x, spawnPos.y);
@@ -502,6 +555,42 @@ export class AgentManager {
     this.agents.clear();
     this.lines.destroy();
     this.particles.destroy();
+  }
+
+  /** Get all agent positions and colors (for minimap) */
+  getAgentPositions(): Array<{ id: string; x: number; y: number; colorIndex: number }> {
+    const result: Array<{ id: string; x: number; y: number; colorIndex: number }> = [];
+    for (const [id, managed] of this.agents) {
+      result.push({
+        id,
+        x: managed.sprite.container.x,
+        y: managed.sprite.container.y,
+        colorIndex: managed.state.colorIndex,
+      });
+    }
+    return result;
+  }
+
+  /** Get agent state by id */
+  getAgentState(agentId: string): AgentState | undefined {
+    return this.agents.get(agentId)?.state;
+  }
+
+  /** Apply a customization (name/color) to a live agent. Pass empty data to reset to original. */
+  applyCustomization(agentId: string, displayName?: string, colorIndex?: number): void {
+    const managed = this.agents.get(agentId);
+    if (!managed) return;
+
+    const agent = managed.state;
+
+    // If displayName provided, use it. If undefined (reset), restore original.
+    const name = displayName || agent.agentName || agent.projectName || agent.id.slice(0, 8);
+    managed.sprite.setCustomName(name);
+
+    // If colorIndex provided, use it. If undefined (reset), restore original.
+    const ci = colorIndex ?? agent.colorIndex;
+    const palette = AGENT_PALETTES[ci % AGENT_PALETTES.length];
+    managed.sprite.rebuildTextures(palette, ci, this.app.renderer);
   }
 
   /** Get world position of the focused agent (if any) */

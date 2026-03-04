@@ -13,6 +13,8 @@ export class AgentDetailPanel {
   private selectedAgentId: string | null = null;
   private entries: ActivityEntry[] = [];
   private historyListener: ((data: { agentId: string; entries: ActivityEntry[] }) => void) | null = null;
+  private _onCustomize: ((agentId: string, currentName: string) => void) | null = null;
+  private _customizationLookup: ((stableKey: string) => { displayName?: string; colorIndex?: number } | undefined) | null = null;
 
   constructor(store: StateStore) {
     this.store = store;
@@ -23,6 +25,7 @@ export class AgentDetailPanel {
     this.panelEl.innerHTML = `
       <div class="detail-header">
         <div class="detail-header-buttons">
+          <button id="detail-customize" title="Customize this agent">Edit</button>
           <button id="detail-kill" title="Remove this agent">Kill</button>
           <button id="detail-close">&times;</button>
         </div>
@@ -31,6 +34,8 @@ export class AgentDetailPanel {
         <div id="detail-meta"></div>
       </div>
       <div id="detail-stats"></div>
+      <div id="detail-git"></div>
+      <div id="detail-diffs"></div>
       <div class="detail-section-title">Activity Feed</div>
       <div id="detail-feed"></div>
     `;
@@ -41,6 +46,15 @@ export class AgentDetailPanel {
 
     // Kill button
     this.panelEl.querySelector('#detail-kill')!.addEventListener('click', () => this.killAgent());
+
+    // Customize button
+    this.panelEl.querySelector('#detail-customize')!.addEventListener('click', () => {
+      if (this.selectedAgentId && this._onCustomize) {
+        const agent = this.store.getAgent(this.selectedAgentId);
+        const name = agent?.agentName || agent?.projectName || this.selectedAgentId.slice(0, 10);
+        this._onCustomize(this.selectedAgentId, name);
+      }
+    });
 
     // Listen for history responses
     this.historyListener = (data) => {
@@ -53,7 +67,11 @@ export class AgentDetailPanel {
 
     // Live updates for the selected agent
     this.store.on('agent:update', (agent) => {
-      if (agent.id === this.selectedAgentId) this.renderStats(agent);
+      if (agent.id === this.selectedAgentId) {
+        this.renderStats(agent);
+        this.renderGitInfo(agent);
+        this.renderDiffs(agent);
+      }
     });
     this.store.on('agent:idle', (agent) => {
       if (agent.id === this.selectedAgentId) this.renderStats(agent);
@@ -61,6 +79,16 @@ export class AgentDetailPanel {
     this.store.on('agent:shutdown', (agentId) => {
       if (agentId === this.selectedAgentId) this.close();
     });
+  }
+
+  /** Set handler for the customize button */
+  setCustomizeHandler(handler: (agentId: string, currentName: string) => void): void {
+    this._onCustomize = handler;
+  }
+
+  /** Set a lookup function to resolve saved customizations by agent name */
+  setCustomizationLookup(lookup: (stableKey: string) => { displayName?: string; colorIndex?: number } | undefined): void {
+    this._customizationLookup = lookup;
   }
 
   open(agentId: string): void {
@@ -72,6 +100,8 @@ export class AgentDetailPanel {
     if (agent) {
       this.renderHeader(agent);
       this.renderStats(agent);
+      this.renderGitInfo(agent);
+      this.renderDiffs(agent);
     }
 
     // Request history from server
@@ -91,10 +121,24 @@ export class AgentDetailPanel {
     return this.selectedAgentId;
   }
 
-  private renderHeader(agent: AgentState): void {
-    const palette = AGENT_PALETTES[agent.colorIndex % AGENT_PALETTES.length];
+  /** Re-render the header for the currently open agent, with an optional display name override */
+  refreshHeader(displayName?: string): void {
+    if (!this.selectedAgentId) return;
+    const agent = this.store.getAgent(this.selectedAgentId);
+    if (agent) this.renderHeader(agent, displayName);
+  }
+
+  /** Get the stable key for an agent (used for customization lookup) */
+  private getStableKey(agent: AgentState): string {
+    return agent.agentName || agent.projectName || agent.sessionId.slice(0, 12);
+  }
+
+  private renderHeader(agent: AgentState, displayNameOverride?: string): void {
+    const stableKey = this.getStableKey(agent);
+    const customization = this._customizationLookup?.(stableKey);
+    const palette = AGENT_PALETTES[(customization?.colorIndex ?? agent.colorIndex) % AGENT_PALETTES.length];
     const borderColor = hexToCss(palette.body);
-    const name = agent.agentName || agent.projectName || agent.sessionId.slice(0, 12);
+    const name = displayNameOverride || customization?.displayName || stableKey;
 
     const nameEl = this.panelEl.querySelector('#detail-name')!;
     nameEl.innerHTML = `<span style="color:${borderColor}">\u25CF</span> ${escapeAttr(name)} <span class="detail-role">${agent.role.toUpperCase()}</span>`;
@@ -178,6 +222,57 @@ export class AgentDetailPanel {
         <span class="stat-value">${formatDuration(Date.now() - agent.spawnedAt)}</span>
       </div>
     `;
+  }
+
+  private renderGitInfo(agent: AgentState): void {
+    const gitEl = this.panelEl.querySelector('#detail-git') as HTMLElement | null;
+    if (!gitEl) return;
+
+    const hasBranch = !!agent.gitBranch;
+    const hasFiles = agent.recentFiles && agent.recentFiles.length > 0;
+
+    if (!hasBranch && !hasFiles) {
+      gitEl.style.display = 'none';
+      return;
+    }
+
+    gitEl.style.display = '';
+    let html = '';
+    if (hasBranch) {
+      html += `<div class="stat-row"><span class="stat-label">&#128268; Branch</span><span class="stat-value"><code>${escapeAttr(agent.gitBranch!)}</code></span></div>`;
+    }
+    if (hasFiles) {
+      const fileList = agent.recentFiles.map(f => {
+        const short = f.replace(/\\/g, '/').split('/').slice(-2).join('/');
+        return `<div class="git-file">${escapeAttr(short)}</div>`;
+      }).join('');
+      html += `<details class="git-files-details"><summary class="stat-label">&#128196; Recent Files (${agent.recentFiles.length})</summary>${fileList}</details>`;
+    }
+    gitEl.innerHTML = html;
+  }
+
+  private renderDiffs(agent: AgentState): void {
+    const diffsEl = this.panelEl.querySelector('#detail-diffs') as HTMLElement | null;
+    if (!diffsEl) return;
+
+    if (!agent.recentDiffs || agent.recentDiffs.length === 0) {
+      diffsEl.style.display = 'none';
+      return;
+    }
+
+    diffsEl.style.display = '';
+    const items = agent.recentDiffs.map(d => {
+      const shortPath = d.filePath.replace(/\\/g, '/').split('/').slice(-2).join('/');
+      const time = new Date(d.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const oldLines = d.oldText ? d.oldText.split('\n').map(l => `<div class="diff-line diff-del">- ${escapeAttr(l)}</div>`).join('') : '';
+      const newLines = d.newText ? d.newText.split('\n').map(l => `<div class="diff-line diff-add">+ ${escapeAttr(l)}</div>`).join('') : '';
+      return `<details class="diff-entry">
+        <summary class="diff-summary"><span class="diff-file">${escapeAttr(shortPath)}</span><span class="diff-time">${time}</span></summary>
+        <div class="diff-content">${oldLines}${newLines}</div>
+      </details>`;
+    }).join('');
+
+    diffsEl.innerHTML = `<div class="detail-section-title">Recent Edits (${agent.recentDiffs.length})</div>${items}`;
   }
 
   private renderFeed(): void {
