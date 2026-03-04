@@ -115,7 +115,7 @@ export class LeaderboardPanel {
                   <span class="lb-bar-label">${formatTokens(totalTokens)}</span>
                 </div>
               </td>
-              <td>$${r.cost.toFixed(3)}</td>
+              <td>$${r.cost.toFixed(2)}</td>
               <td>${formatDuration(r.duration)}</td>
               <td>${r.toolUseCount}</td>
             </tr>`;

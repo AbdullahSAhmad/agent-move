@@ -235,7 +235,7 @@ export class AnalyticsPanel {
       <div class="analytics-cards">
         <div class="analytics-card total-cost">
           <div class="card-label">Total Cost</div>
-          <div class="card-value">$${totalCost.toFixed(4)}</div>
+          <div class="card-value">$${totalCost.toFixed(2)}</div>
           <div class="card-sub">${formatTokens(allInput)} in / ${formatTokens(totalOutput)} out</div>
         </div>
         <div class="analytics-card velocity">
@@ -252,7 +252,7 @@ export class AnalyticsPanel {
           <div class="card-label">Cache Efficiency</div>
           <div class="card-value">${Math.min(cacheHitRate, 100).toFixed(1)}<span class="card-unit">%</span></div>
           <div class="card-sub">${formatTokens(totalCacheRead)} read / ${formatTokens(totalCacheCreation)} created</div>
-          <div class="cache-savings">~$${cacheSavings.toFixed(4)} saved</div>
+          <div class="cache-savings">~$${cacheSavings.toFixed(2)} saved</div>
         </div>
       </div>
 
@@ -315,7 +315,7 @@ export class AnalyticsPanel {
       <div class="agent-bar-label">
         <span class="agent-dot" style="background:${color}"></span>
         <span class="agent-bar-name">${escapeHtml(agent.name)}</span>
-        <span class="agent-bar-cost">$${cost.toFixed(4)}</span>
+        <span class="agent-bar-cost">$${cost.toFixed(2)}</span>
       </div>
       <div class="agent-bar-track">
         <div class="agent-bar-fill" style="width:${Math.max(2, pct)}%;background:${color}"></div>
