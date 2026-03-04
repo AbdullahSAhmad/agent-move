@@ -16,6 +16,8 @@ export class AgentStateManager extends EventEmitter {
   private agents = new Map<string, AgentState>();
   private idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private shutdownTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Agents with a pending tool call (waiting for result) */
+  private pendingTool = new Set<string>();
   private colorCounter = 0;
   private activityHistory = new Map<string, ActivityEntry[]>();
   private timelineBuffer: TimelineEvent[] = [];
@@ -113,6 +115,27 @@ export class AgentStateManager extends EventEmitter {
     if (entries.length > MAX_HISTORY_PER_AGENT) {
       entries.splice(0, entries.length - MAX_HISTORY_PER_AGENT);
     }
+  }
+
+  /** Tools that can block for a long time waiting for results (e.g. shell commands, browser actions). */
+  private static readonly LONG_RUNNING_TOOLS = new Set([
+    'Bash',
+    'Agent',
+    'WebFetch',
+    'WebSearch',
+    // Browser/playwright tools that wait for navigation or network
+    'mcp__playwright__browser_navigate',
+    'mcp__playwright__browser_wait_for',
+    'mcp__playwright__browser_run_code',
+    'mcp__chrome-devtools__navigate_page',
+    'mcp__chrome-devtools__wait_for',
+    'mcp__chrome-devtools__evaluate_script',
+    'mcp__chrome-devtools__performance_start_trace',
+    'mcp__chrome-devtools__performance_stop_trace',
+  ]);
+
+  private isLongRunningTool(toolName: string): boolean {
+    return AgentStateManager.LONG_RUNNING_TOOLS.has(toolName);
   }
 
   private summarizeToolInput(input: unknown): string {
@@ -225,6 +248,26 @@ export class AgentStateManager extends EventEmitter {
     // Sub-agents spawned by the team-lead without team_name stay as subagents.
     if (pendingTeam) return 'team-member';
     return 'subagent';
+  }
+
+  /**
+   * Called when ANY new bytes appear in a session's JSONL file,
+   * even if the parser doesn't extract a meaningful activity.
+   * This keeps the agent alive during long-running tool executions
+   * (e.g. Bash commands) where the tool result writes to the file
+   * but doesn't produce a ParsedActivity.
+   */
+  heartbeat(sessionId: string): void {
+    const canonicalId = this.resolveAgentId(sessionId);
+    const agent = this.agents.get(canonicalId);
+    if (!agent || this.hiddenAgents.has(canonicalId)) return;
+
+    // Only reset the idle timer — don't change agent state or emit events.
+    // This keeps pending-tool agents alive while their tool runs.
+    if (this.pendingTool.has(canonicalId)) {
+      agent.lastActivityAt = Date.now();
+      this.resetIdleTimer(canonicalId);
+    }
   }
 
   processMessage(sessionId: string, activity: ParsedActivity, sessionInfo: SessionInfo) {
@@ -463,6 +506,15 @@ export class AgentStateManager extends EventEmitter {
 
     switch (activity.type) {
       case 'tool_use': {
+        // Only mark as pending for tools that can genuinely run for a long time.
+        // Instant tools (messaging, task management, reads, edits) complete quickly
+        // and should NOT prevent idle detection.
+        const toolName = activity.toolName ?? '';
+        if (this.isLongRunningTool(toolName)) {
+          this.pendingTool.add(agentId);
+        } else {
+          this.pendingTool.delete(agentId);
+        }
         const prevZone = agent.currentZone;
         agent.currentTool = activity.toolName ?? null;
         agent.currentActivity = this.summarizeToolInput(activity.toolInput) || null;
@@ -578,6 +630,8 @@ export class AgentStateManager extends EventEmitter {
       }
 
       case 'text':
+        // Text from assistant = Claude has responded, tool is no longer pending
+        this.pendingTool.delete(agentId);
         if (activity.text) {
           agent.speechText = activity.text;
           agent.currentActivity = activity.text;
@@ -593,6 +647,8 @@ export class AgentStateManager extends EventEmitter {
         break;
 
       case 'token_usage':
+        // Token usage = message finished, tool is no longer pending
+        this.pendingTool.delete(agentId);
         agent.totalInputTokens += activity.inputTokens ?? 0;
         agent.totalOutputTokens += activity.outputTokens ?? 0;
         agent.cacheReadTokens += activity.cacheReadTokens ?? 0;
@@ -720,6 +776,11 @@ export class AgentStateManager extends EventEmitter {
     const timer = setTimeout(() => {
       const agent = this.agents.get(agentId);
       if (agent && !this.hiddenAgents.has(agentId)) {
+        // If a tool is pending (waiting for result), don't go idle — reschedule
+        if (this.pendingTool.has(agentId)) {
+          this.resetIdleTimer(agentId);
+          return;
+        }
         agent.isIdle = true;
         agent.isPlanning = false;
         agent.currentZone = 'idle';
@@ -784,6 +845,7 @@ export class AgentStateManager extends EventEmitter {
 
     this.clearTimers(sessionId);
     this.hiddenAgents.delete(sessionId);
+    this.pendingTool.delete(sessionId);
 
     const ts = Date.now();
     this.addHistory(sessionId, { timestamp: ts, kind: 'shutdown' });

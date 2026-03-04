@@ -73,11 +73,19 @@ export class FileWatcher {
         const sessionId = basename(filePath, '.jsonl');
         const sessionInfo = claudePaths.parseSessionPath(filePath);
 
+        let hadParsedActivity = false;
         for (const line of lines) {
           const parsed = this.parser.parseLine(line);
           if (parsed) {
+            hadParsedActivity = true;
             this.stateManager.processMessage(sessionId, parsed, sessionInfo);
           }
+        }
+
+        // If the file grew but no parsed activities (e.g. tool results, system
+        // messages), send a heartbeat so pending-tool agents stay alive.
+        if (!hadParsedActivity && lines.length > 0) {
+          this.stateManager.heartbeat(sessionId);
         }
       } finally {
         await handle.close();
