@@ -18,8 +18,9 @@ export class Minimap {
     this.scaleY = MAP_H / WORLD_HEIGHT;
 
     this.canvas = document.createElement('canvas');
-    this.canvas.width = MAP_W;
-    this.canvas.height = MAP_H;
+    const dpr = window.devicePixelRatio || 1;
+    this.canvas.width = MAP_W * dpr;
+    this.canvas.height = MAP_H * dpr;
     this.canvas.id = 'minimap';
     this.canvas.style.cssText = `
       position: fixed; bottom: 12px; right: 12px;
@@ -31,6 +32,7 @@ export class Minimap {
     `;
     document.body.appendChild(this.canvas);
     this.ctx = this.canvas.getContext('2d')!;
+    this.ctx.scale(dpr, dpr);
 
     // Click to navigate
     this.canvas.addEventListener('click', (e) => {
@@ -56,6 +58,7 @@ export class Minimap {
 
     const ctx = this.ctx;
     ctx.clearRect(0, 0, MAP_W, MAP_H);
+    ctx.imageSmoothingEnabled = false;
 
     // Draw zones
     for (const zone of ZONES) {
@@ -68,6 +71,15 @@ export class Minimap {
       ctx.lineWidth = 0.5;
       ctx.fillRect(zx, zy, zw, zh);
       ctx.strokeRect(zx, zy, zw, zh);
+
+      // Zone name label
+      ctx.save();
+      ctx.fillStyle = '#' + zone.color.toString(16).padStart(6, '0') + 'aa';
+      ctx.font = '600 8px "Inter", "SF Pro Text", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(zone.label, zx + zw / 2, zy + zh / 2, zw - 4);
+      ctx.restore();
     }
 
     // Draw agents
