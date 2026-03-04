@@ -74,6 +74,8 @@ This starts the server on `:3333` and the Vite dev server on `:5173` with hot re
 
 ## Features
 
+### Visualization
+
 - **Programmatic pixel-art sprites** — 16x16 characters rendered at 3x scale, no external image assets
 - **12 color palettes** — each agent gets a distinct look
 - **Animations** — idle breathing, walking between zones, working effects
@@ -82,8 +84,45 @@ This starts the server on `:3333` and the Vite dev server on `:5173` with hot re
 - **Relationship lines** — dashed connections between parent/child and team agents
 - **Zone glow** — rooms light up when agents are inside
 - **Particle effects** — sparkles on tool use
-- **Pan & zoom** — scroll and drag to navigate the world
-- **Sidebar** — live agent list with zone, current tool, and token counts
+- **Agent trails** — toggle fading trail dots behind moving agents (`T`)
+- **Day/night cycle** — ambient lighting based on your local time (`N`)
+- **4 themes** — Office, Space, Castle, Cyberpunk — selectable from the top bar
+
+### Dashboard
+
+- **Top bar** — navigation tabs (Monitor / Analytics / Leaderboard), live stats (active agents, idle count, total cost, token velocity), and quick actions
+- **Agent list** — live sidebar with zone, current tool, token counts, and status indicators
+- **Agent detail panel** — click any agent to see model, role, tokens, uptime, git branch, recent files with diff viewer, and scrolling activity feed
+- **Agent customization** — rename agents and change their color palette (persisted in localStorage)
+- **Minimap** — clickable overview showing zone layout, agent positions, and viewport (`\``)
+
+### Analytics
+
+- **Total cost tracking** — real-time cost estimation including cache read/creation token pricing
+- **Cache efficiency** — cache hit rate percentage and estimated savings
+- **Token velocity** — tokens/min with sparkline chart and trend indicator
+- **Cost by agent** — per-agent cost breakdown with bar charts
+- **Time by zone** — cumulative time distribution across zones (including idle)
+- **Tool usage** — frequency breakdown of the most-used tools
+- **Session duration** — per-agent uptime with active/idle status
+- **Cost threshold alerts** — configurable budget alert with visual notification
+
+### Leaderboard
+
+- **Agent rankings** — sortable by tokens, cost, duration, or tool count
+- **Medal badges** — top 3 agents highlighted
+- **Visual bars** — proportional token usage comparison
+
+### Navigation & Controls
+
+- **Pan & zoom** — scroll wheel to zoom, click and drag to pan the world
+- **Command palette** — fuzzy search for any action (`Ctrl+K`)
+- **Focus mode** — follow an agent with smooth camera tracking (`F` to cycle, `Esc` to exit)
+- **Timeline** — scrubber with live/replay modes, speed control (0.5x–8x), event filters, and per-agent swim lanes
+- **Session export** — generate a markdown report of the session (`E`)
+- **Sound effects** — synthesized audio for spawn, zone changes, tool use, idle, and shutdown (`M` to mute)
+- **Toast notifications** — popup alerts for agent lifecycle events (spawn, idle, shutdown)
+- **Keyboard shortcuts** — press `?` to see all available shortcuts
 - **Auto-reconnect** — WebSocket reconnects with exponential backoff if the connection drops
 
 ## How It Works
@@ -121,12 +160,31 @@ agent-move/
 │   └── client/             # Pixi.js frontend
 │       └── src/
 │           ├── sprites/        pixel-art data, palette resolver, textures
-│           ├── world/          zone renderer, grid, camera
+│           ├── world/          zone renderer, grid, camera, themes, day/night
 │           ├── agents/         sprite logic, movement, relationships
-│           ├── effects/        particles, zone glow
+│           ├── effects/        particles, zone glow, agent trails
 │           ├── connection/     WebSocket client, state store
-│           └── ui/             HTML overlay sidebar
+│           ├── audio/          sound effects, notifications
+│           └── ui/             top bar, panels, overlays, command palette
 ```
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+K` | Command palette |
+| `?` | Shortcuts help |
+| `F` | Cycle focus between agents |
+| `Esc` | Exit focus mode |
+| `A` | Toggle analytics |
+| `L` | Toggle leaderboard |
+| `T` | Toggle agent trails |
+| `N` | Toggle day/night cycle |
+| `M` | Toggle sound |
+| `E` | Export session |
+| `` ` `` | Toggle minimap |
+| `P` | Cycle theme |
+| `H` | Toggle heatmap |
 
 ## API
 
