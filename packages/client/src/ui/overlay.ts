@@ -5,15 +5,13 @@ import { escapeHtml, escapeAttr, truncate, formatTokenPair, hexToCss } from '../
 
 type FilterMode = 'all' | 'active' | 'idle' | 'done' | ZoneId;
 
-/** Token sample for sparkline rendering */
 interface TokenHistory {
-  samples: number[]; // rolling buffer of total tokens at each sample time
+  samples: number[];
 }
 
 export class Overlay {
   private store: StateStore;
   private agentListEl: HTMLElement;
-  private statusEl: HTMLElement;
   private filterEl: HTMLElement;
   private refreshTimer: ReturnType<typeof setInterval>;
   private onAgentClick: ((agentId: string) => void) | null = null;
@@ -23,7 +21,6 @@ export class Overlay {
   private renderPending = false;
   scheduleRender: () => void;
 
-  // Sparkline data: per-agent rolling token history (sampled every 2s, last 30 samples = 1min)
   private tokenHistory = new Map<string, TokenHistory>();
   private sparklineSampleTimer: ReturnType<typeof setInterval>;
 
@@ -38,7 +35,6 @@ export class Overlay {
   constructor(store: StateStore) {
     this.store = store;
     this.agentListEl = document.getElementById('agent-list')!;
-    this.statusEl = document.getElementById('connection-status')!;
 
     // Create filter pills
     this.filterEl = document.createElement('div');
@@ -46,10 +42,7 @@ export class Overlay {
     this.agentListEl.parentElement!.insertBefore(this.filterEl, this.agentListEl);
     this.renderFilters();
 
-    // Listen for connection changes
-    this.store.on('connection:status', (status) => this.updateConnectionStatus(status));
-
-    // Listen to agent events — coalesce via requestAnimationFrame to avoid excessive DOM rebuilds
+    // Coalesced rendering
     this.scheduleRender = () => {
       if (!this.renderPending) {
         this.renderPending = true;
@@ -65,10 +58,7 @@ export class Overlay {
     this.store.on('agent:shutdown', this.scheduleRender);
     this.store.on('state:reset', this.scheduleRender);
 
-    // Also refresh periodically for token count updates
     this.refreshTimer = setInterval(this.scheduleRender, 500);
-
-    // Sample sparkline data every 2 seconds
     this.sparklineSampleTimer = setInterval(() => this.sampleSparklines(), 2000);
   }
 
@@ -81,10 +71,8 @@ export class Overlay {
         this.tokenHistory.set(id, hist);
       }
       hist.samples.push(agent.totalInputTokens + agent.totalOutputTokens);
-      // Keep last 30 samples (1 minute at 2s intervals)
       if (hist.samples.length > 30) hist.samples.shift();
     }
-    // Clean up removed agents
     for (const id of this.tokenHistory.keys()) {
       if (!agents.has(id)) this.tokenHistory.delete(id);
     }
@@ -107,7 +95,6 @@ export class Overlay {
       { label: 'Done', value: 'done' },
     ];
 
-    // Count done agents for badge
     const doneCount = Array.from(this.store.getAgents().values()).filter(a => a.isDone).length;
 
     this.filterEl.innerHTML = filters.map(f => {
@@ -121,7 +108,6 @@ export class Overlay {
       ${doneCount > 0 ? `<button class="clean-done-btn" title="Remove ${doneCount} done agent${doneCount > 1 ? 's' : ''}">Clean up (${doneCount})</button>` : ''}
     `;
 
-    // Bind filter clicks
     this.filterEl.querySelectorAll('.filter-pill').forEach(btn => {
       btn.addEventListener('click', () => {
         this.currentFilter = (btn as HTMLElement).dataset.filter as FilterMode;
@@ -131,7 +117,6 @@ export class Overlay {
       });
     });
 
-    // Bind zone select
     const zoneSelect = this.filterEl.querySelector('.filter-zone-select') as HTMLSelectElement;
     zoneSelect.addEventListener('change', () => {
       if (zoneSelect.value) {
@@ -143,16 +128,10 @@ export class Overlay {
       this.renderAgents();
     });
 
-    // Bind clean-up button
     const cleanBtn = this.filterEl.querySelector('.clean-done-btn');
     if (cleanBtn) {
       cleanBtn.addEventListener('click', () => this.cleanDoneAgents());
     }
-  }
-
-  private updateConnectionStatus(status: ConnectionStatus): void {
-    this.statusEl.textContent = status === 'connected' ? 'Connected' : 'Disconnected';
-    this.statusEl.className = status === 'connected' ? 'connected' : 'disconnected';
   }
 
   private shortenId(id: string): string {
@@ -189,7 +168,6 @@ export class Overlay {
       case 'done':
         return agents.filter(a => a.isDone);
       default:
-        // Zone filter
         return agents.filter(a => a.currentZone === this.currentFilter);
     }
   }
@@ -198,18 +176,35 @@ export class Overlay {
     let agents = Array.from(this.store.getAgents().values());
     const totalCount = agents.length;
 
-    // Apply filter
     agents = this.filterAgents(agents);
 
     if (agents.length === 0) {
-      const filterMsg = this.currentFilter !== 'all'
-        ? `No ${this.currentFilter} agents (${totalCount} total)`
-        : 'No active agents';
-      this.agentListEl.innerHTML = `<div style="color: #666; font-style: italic;">${filterMsg}</div>`;
+      if (totalCount === 0) {
+        // Empty state: no agents at all
+        this.agentListEl.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">
+              <svg viewBox="0 0 48 48" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
+                <rect x="14" y="6" width="20" height="16" rx="3" />
+                <circle cx="20" cy="14" r="2" fill="currentColor"/>
+                <circle cx="28" cy="14" r="2" fill="currentColor"/>
+                <rect x="16" y="24" width="16" height="14" rx="2" />
+                <rect x="10" y="26" width="6" height="4" rx="1" />
+                <rect x="32" y="26" width="6" height="4" rx="1" />
+                <rect x="18" y="38" width="4" height="6" rx="1" />
+                <rect x="26" y="38" width="4" height="6" rx="1" />
+              </svg>
+            </div>
+            <div class="empty-title">Waiting for agents</div>
+            <div class="empty-desc">Start a Claude Code session and agents will appear here automatically</div>
+          </div>`;
+      } else {
+        const filterMsg = `No ${this.currentFilter} agents (${totalCount} total)`;
+        this.agentListEl.innerHTML = `<div class="empty-state"><div class="empty-desc">${filterMsg}</div></div>`;
+      }
       return;
     }
 
-    // Sort: active first, then idle, then done, then by spawn time
     agents.sort((a, b) => {
       if (a.isDone !== b.isDone) return a.isDone ? 1 : -1;
       if (a.isIdle !== b.isIdle) return a.isIdle ? 1 : -1;
@@ -218,12 +213,10 @@ export class Overlay {
 
     const allAgentsMap = this.store.getAgents();
 
-    // Separate subagents from others
     const subAgents = agents.filter(a => a.role === 'subagent');
     const nonSubAgents = agents.filter(a => a.role !== 'subagent');
     const orphanSubs: AgentState[] = [];
 
-    // Map parentId -> subagents in filtered list (only nest if parent is visible)
     const filteredNonSubIds = new Set(nonSubAgents.map(a => a.id));
     const childrenOf = new Map<string, AgentState[]>();
     for (const sub of subAgents) {
@@ -236,7 +229,6 @@ export class Overlay {
       }
     }
 
-    // Count actual subagents per parent (exclude team members who share parentId)
     const totalSubCountOf = new Map<string, number>();
     for (const a of allAgentsMap.values()) {
       if (a.parentId && a.role === 'subagent') {
@@ -244,7 +236,6 @@ export class Overlay {
       }
     }
 
-    // Group non-subagents by rootSessionId:teamName (prevents cross-session grouping)
     const teamGroups = new Map<string, AgentState[]>();
     const standalone: AgentState[] = [];
     for (const agent of nonSubAgents) {
@@ -260,21 +251,17 @@ export class Overlay {
 
     let html = '';
 
-    // Render team groups
     for (const [groupKey, members] of teamGroups) {
-      // Extract display name (strip rootSessionId prefix)
       const colonIdx = groupKey.indexOf(':');
       const teamName = colonIdx >= 0 ? groupKey.slice(colonIdx + 1) : groupKey;
       const rootId = members[0]?.rootSessionId;
 
-      // Sort: lead first, then by spawn time
       members.sort((a, b) => {
         if (a.role === 'team-lead' && b.role !== 'team-lead') return -1;
         if (a.role !== 'team-lead' && b.role === 'team-lead') return 1;
         return 0;
       });
 
-      // Count total team members from full state (scoped to same session)
       let totalTeamCount = 0;
       for (const a of allAgentsMap.values()) {
         if (a.teamName === teamName && a.rootSessionId === rootId) totalTeamCount++;
@@ -302,28 +289,22 @@ export class Overlay {
       html += `</div>`;
     }
 
-    // Render standalone agents
     for (const agent of standalone) {
       html += this.renderAgentWithSubs(agent, childrenOf, totalSubCountOf);
     }
 
-    // Orphan subagents (parent not visible or not found)
     for (const orphan of orphanSubs) {
       html += this.renderCard(orphan, true);
     }
 
     this.agentListEl.innerHTML = html;
 
-    // Bind group header toggle handlers
+    // Bind handlers
     this.agentListEl.querySelectorAll('.group-header').forEach(el => {
       el.addEventListener('click', () => {
         const groupId = (el as HTMLElement).dataset.groupId;
         if (groupId) this.toggleGroup(groupId);
       });
-    });
-
-    // Keyboard support for group headers
-    this.agentListEl.querySelectorAll('.group-header').forEach(el => {
       el.addEventListener('keydown', (e) => {
         if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
           (e as KeyboardEvent).preventDefault();
@@ -333,7 +314,6 @@ export class Overlay {
       });
     });
 
-    // Bind sub-collapse-bar handlers (separate toggle bar below parent cards)
     this.agentListEl.querySelectorAll('.sub-collapse-bar').forEach(el => {
       el.addEventListener('click', () => {
         const groupId = (el as HTMLElement).dataset.groupId;
@@ -341,7 +321,6 @@ export class Overlay {
       });
     });
 
-    // Attach card click handlers
     this.agentListEl.querySelectorAll('.agent-card[data-agent-id]').forEach((el) => {
       el.addEventListener('click', () => {
         const id = (el as HTMLElement).dataset.agentId;
@@ -349,14 +328,12 @@ export class Overlay {
       });
     });
 
-    // Render sparklines onto canvases
     this.agentListEl.querySelectorAll('.sparkline-canvas').forEach((canvas) => {
       const agentId = (canvas as HTMLElement).dataset.agentId;
       if (agentId) this.drawSparkline(canvas as HTMLCanvasElement, agentId);
     });
   }
 
-  /** Render an agent card with its collapsible subagent children */
   private renderAgentWithSubs(
     agent: AgentState,
     childrenOf: Map<string, AgentState[]>,
@@ -373,10 +350,8 @@ export class Overlay {
       const groupId = `sub:${agent.id}`;
       const isCollapsed = this.collapsedGroups.has(groupId);
 
-      // Don't show sub badge on card — the collapse bar handles the count
       html += this.renderCard(agent, isChild, 0);
 
-      // Separate clickable collapse bar below the card
       const chevron = isCollapsed ? '&#9656;' : '&#9662;';
       const label = `${subCount} subagent${subCount > 1 ? 's' : ''}`;
       html += `<div class="sub-collapse-bar${isCollapsed ? ' is-collapsed' : ''}" data-group-id="${escapeAttr(groupId)}">
@@ -408,22 +383,27 @@ export class Overlay {
     const toolText = agent.currentTool ?? 'none';
     const tokens = formatTokenPair(agent.totalInputTokens, agent.totalOutputTokens);
     const name = custom?.displayName || agent.agentName || agent.projectName || this.shortenId(agent.sessionId);
-    const opacity = agent.isDone ? '0.4' : agent.isIdle ? '0.6' : '1';
     const childClass = isChild ? ' agent-card-child' : '';
     const doneClass = agent.isDone ? ' agent-card-done' : '';
-    const doneBadge = agent.isDone ? '<span style="background:#66666633;color:#888;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:bold;margin-left:6px;">DONE</span>' : '';
+    const doneBadge = agent.isDone ? '<span class="status-badge done">DONE</span>' : '';
     const subBadge = subCount > 0 ? `<span class="sub-count" title="${subCount} subagent${subCount > 1 ? 's' : ''}">${subCount} sub${subCount > 1 ? 's' : ''}</span>` : '';
 
-    return `<div class="agent-card${childClass}${doneClass}" data-agent-id="${agent.id}" style="border-left: 3px solid ${borderColor}; opacity: ${opacity};">
+    // Status dot instead of opacity
+    const statusClass = agent.isDone ? 'done' : agent.isIdle ? 'idle' : 'active';
+
+    return `<div class="agent-card${childClass}${doneClass}" data-agent-id="${agent.id}" style="border-left: 3px solid ${borderColor};">
       <div class="card-top-row">
-        <div class="name">${isChild ? '<span class="child-connector">└</span>' : ''}${name}${this.roleBadge(agent.role)}${doneBadge}${subBadge}</div>
+        <div class="name">
+          <span class="agent-status-dot ${statusClass}"></span>
+          ${isChild ? '<span class="child-connector">&#8627;</span>' : ''}${escapeHtml(name)}${this.roleBadge(agent.role)}${doneBadge}${subBadge}
+        </div>
         <div class="card-actions">
           <canvas class="sparkline-canvas" data-agent-id="${agent.id}" width="60" height="20"></canvas>
         </div>
       </div>
       ${agent.taskDescription ? `<div class="task-desc" title="${escapeAttr(agent.taskDescription)}">${escapeHtml(truncate(agent.taskDescription, 48))}</div>` : ''}
       <div class="zone">${zone?.icon ?? ''} ${zoneName} · ${toolText}</div>
-      <div style="color: #666; font-size: 11px; margin-top: 3px;">${tokens}</div>
+      <div class="card-tokens">${tokens}</div>
     </div>`;
   }
 
@@ -438,7 +418,6 @@ export class Overlay {
     const h = canvas.height;
     ctx.clearRect(0, 0, w, h);
 
-    // Calculate deltas (token increments per sample)
     const deltas: number[] = [];
     for (let i = 1; i < hist.samples.length; i++) {
       deltas.push(Math.max(0, hist.samples[i] - hist.samples[i - 1]));
@@ -447,7 +426,6 @@ export class Overlay {
     const maxDelta = Math.max(...deltas, 1);
     const stepX = w / Math.max(deltas.length - 1, 1);
 
-    // Draw area fill
     ctx.beginPath();
     ctx.moveTo(0, h);
     for (let i = 0; i < deltas.length; i++) {
@@ -460,7 +438,6 @@ export class Overlay {
     ctx.fillStyle = 'rgba(74, 222, 128, 0.15)';
     ctx.fill();
 
-    // Draw line
     ctx.beginPath();
     for (let i = 0; i < deltas.length; i++) {
       const x = i * stepX;

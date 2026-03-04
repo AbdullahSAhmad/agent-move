@@ -88,18 +88,17 @@ export class Camera {
     this.zoomBy(1 / 1.2);
   }
 
-  /** Reset to fit the world in the viewport (accounting for sidebar) */
-  resetView(worldW: number, worldH: number, sidebarW = 300): void {
+  /** Reset to fit the world in the viewport */
+  resetView(worldW: number, worldH: number): void {
     const screenW = this.app.screen.width;
     const screenH = this.app.screen.height;
-    const availW = screenW - sidebarW;
     const pad = 16;
-    const scaleX = (availW - pad * 2) / worldW;
+    const scaleX = (screenW - pad * 2) / worldW;
     const scaleY = (screenH - pad * 2) / worldH;
     const fitZoom = Math.min(scaleX, scaleY, 1);
     this.setZoom(fitZoom);
     this.world.position.set(
-      (availW - worldW * fitZoom) / 2,
+      (screenW - worldW * fitZoom) / 2,
       (screenH - worldH * fitZoom) / 2,
     );
   }
@@ -108,8 +107,7 @@ export class Camera {
   smoothFollow(worldX: number, worldY: number, lerp = 0.05): void {
     const screenW = this.app.screen.width;
     const screenH = this.app.screen.height;
-    const sidebarW = 300;
-    const cx = (screenW - sidebarW) / 2;
+    const cx = screenW / 2;
     const cy = screenH / 2;
     const targetPosX = cx - worldX * this.zoom;
     const targetPosY = cy - worldY * this.zoom;
@@ -134,8 +132,7 @@ export class Camera {
   panTo(worldX: number, worldY: number): void {
     const screenW = this.app.screen.width;
     const screenH = this.app.screen.height;
-    const sidebarW = 300;
-    const cx = (screenW - sidebarW) / 2;
+    const cx = screenW / 2;
     const cy = screenH / 2;
     this.world.position.x = cx - worldX * this.zoom;
     this.world.position.y = cy - worldY * this.zoom;

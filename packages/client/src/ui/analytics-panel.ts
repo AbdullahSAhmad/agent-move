@@ -4,9 +4,8 @@ import type { StateStore } from '../connection/state-store.js';
 import { escapeHtml, hexToCss, formatTokens, formatDuration } from '../utils/formatting.js';
 
 /**
- * Feature 3: Session Cost Tracker & Analytics Dashboard
- * Toggleable panel showing real-time cost estimation, per-agent breakdown,
- * token velocity, cost-by-zone, and threshold alerts.
+ * Analytics Panel — renders into a provided container element.
+ * Shows real-time cost estimation, per-agent breakdown, token velocity, and more.
  */
 
 interface AgentSnapshot {
@@ -28,47 +27,38 @@ interface TokenSample {
   totalTokens: number;
 }
 
-const VELOCITY_WINDOW = 60_000; // 1 minute for velocity calculation
-const SAMPLE_INTERVAL = 2_000;  // sample every 2 seconds
-const MAX_SAMPLES = 180;        // 6 minutes of samples
+const VELOCITY_WINDOW = 60_000;
+const SAMPLE_INTERVAL = 2_000;
+const MAX_SAMPLES = 180;
 
 export class AnalyticsPanel {
-  private panelEl: HTMLElement;
+  private containerEl: HTMLElement;
+  private contentEl: HTMLElement;
   private store: StateStore;
-  private isOpen = false;
+  private isVisible = false;
   private refreshTimer: ReturnType<typeof setInterval>;
   private sampleTimer: ReturnType<typeof setInterval>;
   private tokenSamples: TokenSample[] = [];
-  private costThreshold = 5.0; // dollars
+  private costThreshold = 5.0;
   private thresholdAlerted = false;
   private thresholdFocused = false;
   private alertEl: HTMLElement | null = null;
-  /** Tool usage frequency tracker: toolName -> count */
   private toolCounts = new Map<string, number>();
   private _customizationLookup: ((agent: AgentState) => { displayName: string; colorIndex: number }) | null = null;
 
-  /** Set a lookup function to resolve customized display name + color from agent state */
   setCustomizationLookup(lookup: (agent: AgentState) => { displayName: string; colorIndex: number }): void {
     this._customizationLookup = lookup;
   }
 
-  constructor(store: StateStore) {
+  constructor(store: StateStore, container: HTMLElement) {
     this.store = store;
+    this.containerEl = container;
 
-    // Create panel
-    this.panelEl = document.createElement('div');
-    this.panelEl.id = 'analytics-panel';
-    this.panelEl.innerHTML = `
-      <div class="analytics-header">
-        <button id="analytics-close">&times;</button>
-        <div class="analytics-title"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="vertical-align:-2px;margin-right:6px;opacity:0.7"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>Analytics &amp; Cost Tracker</div>
-      </div>
-      <div id="analytics-content"></div>
-    `;
-    document.body.appendChild(this.panelEl);
-
-    // Close button
-    this.panelEl.querySelector('#analytics-close')!.addEventListener('click', () => this.close());
+    // Create content wrapper
+    this.contentEl = document.createElement('div');
+    this.contentEl.id = 'analytics-content';
+    this.contentEl.style.display = 'none';
+    this.containerEl.appendChild(this.contentEl);
 
     // Create alert element
     this.alertEl = document.createElement('div');
@@ -78,16 +68,15 @@ export class AnalyticsPanel {
 
     // Refresh panel contents
     this.refreshTimer = setInterval(() => {
-      if (this.isOpen) this.render();
+      if (this.isVisible) this.render();
     }, 1000);
 
-    // Sample token totals for velocity calculation
+    // Sample token totals
     this.sampleTimer = setInterval(() => this.takeSample(), SAMPLE_INTERVAL);
 
-    // Listen for updates to check threshold and track tools
+    // Listen for updates
     this.store.on('agent:update', (agent: AgentState) => {
       this.checkThreshold();
-      // Track tool usage frequency
       if (agent.currentTool) {
         const count = this.toolCounts.get(agent.currentTool) ?? 0;
         this.toolCounts.set(agent.currentTool, count + 1);
@@ -95,20 +84,21 @@ export class AnalyticsPanel {
     });
   }
 
-  open(): void {
-    this.isOpen = true;
-    this.panelEl.classList.add('open');
+  show(): void {
+    this.isVisible = true;
+    this.contentEl.style.display = '';
     this.render();
   }
 
-  close(): void {
-    this.isOpen = false;
-    this.panelEl.classList.remove('open');
+  hide(): void {
+    this.isVisible = false;
+    this.contentEl.style.display = 'none';
   }
 
+  /** Legacy toggle for command palette compatibility */
   toggle(): void {
-    if (this.isOpen) this.close();
-    else this.open();
+    if (this.isVisible) this.hide();
+    else this.show();
   }
 
   private takeSample(): void {
@@ -157,7 +147,7 @@ export class AnalyticsPanel {
 
     const first = recentSamples[0];
     const last = recentSamples[recentSamples.length - 1];
-    const elapsed = (last.timestamp - first.timestamp) / 60_000; // minutes
+    const elapsed = (last.timestamp - first.timestamp) / 60_000;
     if (elapsed < 0.01) return 0;
     return (last.totalTokens - first.totalTokens) / elapsed;
   }
@@ -196,7 +186,7 @@ export class AnalyticsPanel {
 
   private showAlert(cost: number): void {
     if (!this.alertEl) return;
-    this.alertEl.textContent = `⚠ Cost threshold exceeded: $${cost.toFixed(2)}`;
+    this.alertEl.textContent = `Warning: Cost threshold exceeded: $${cost.toFixed(2)}`;
     this.alertEl.style.display = 'block';
     this.alertEl.classList.add('flash');
     setTimeout(() => {
@@ -210,7 +200,6 @@ export class AnalyticsPanel {
   }
 
   private render(): void {
-    const content = this.panelEl.querySelector('#analytics-content')!;
     const snapshots = this.getSnapshots();
     const totalCost = snapshots.reduce((sum, a) => sum + this.calculateCost(a), 0);
     const totalInput = snapshots.reduce((sum, a) => sum + a.inputTokens, 0);
@@ -219,35 +208,27 @@ export class AnalyticsPanel {
     const totalCacheCreation = snapshots.reduce((sum, a) => sum + a.cacheCreationTokens, 0);
     const velocity = this.getTokenVelocity();
     const trend = this.getVelocityTrend();
-    const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : '→';
+    const trendIcon = trend === 'up' ? '\u2191' : trend === 'down' ? '\u2193' : '\u2192';
     const trendColor = trend === 'up' ? '#f87171' : trend === 'down' ? '#4ade80' : '#888';
 
-    // Cache efficiency: cacheRead / (totalInput + cacheRead) * 100
     const cacheTotal = totalInput + totalCacheRead;
     const cacheHitRate = cacheTotal > 0 ? (totalCacheRead / cacheTotal) * 100 : 0;
-    // Estimate savings: cache reads cost ~90% less than normal input tokens
     const avgPricing = getModelPricing(snapshots[0]?.model ?? null);
     const cacheSavings = (totalCacheRead / 1_000_000) * avgPricing.input * 0.9;
 
-    // Per-zone cost
     const zoneCosts = new Map<ZoneId, number>();
-    // We approximate zone cost by distributing agent cost equally across their time
-    // (simplified: assign full cost to current zone)
     for (const a of snapshots) {
       const cost = this.calculateCost(a);
       zoneCosts.set(a.zone, (zoneCosts.get(a.zone) ?? 0) + cost);
     }
 
-    // Sort agents by cost descending
     const sortedAgents = [...snapshots].sort(
       (a, b) => this.calculateCost(b) - this.calculateCost(a)
     );
 
-    // Velocity sparkline
     const sparkSvg = this.renderVelocitySparkline();
 
-    content.innerHTML = `
-      <!-- Summary Cards -->
+    this.contentEl.innerHTML = `
       <div class="analytics-cards">
         <div class="analytics-card total-cost">
           <div class="card-label">Total Cost</div>
@@ -272,55 +253,47 @@ export class AnalyticsPanel {
         </div>
       </div>
 
-      <!-- Velocity Sparkline -->
       <div class="analytics-section">
         <div class="section-title">Token Rate (last ${Math.round(this.tokenSamples.length * SAMPLE_INTERVAL / 60000)}min)</div>
         <div class="sparkline-container">${sparkSvg}</div>
       </div>
 
-      <!-- Per-Agent Breakdown -->
       <div class="analytics-section">
         <div class="section-title">Cost by Agent</div>
-        ${sortedAgents.map((a) => this.renderAgentBar(a, totalCost)).join('')}
+        ${sortedAgents.length > 0 ? sortedAgents.map((a) => this.renderAgentBar(a, totalCost)).join('') : '<div class="analytics-empty">No agents active</div>'}
       </div>
 
-      <!-- Zone Distribution -->
       <div class="analytics-section">
         <div class="section-title">Cost by Zone (current)</div>
         ${this.renderZoneBars(zoneCosts, totalCost)}
       </div>
 
-      <!-- Tool Usage Distribution -->
       <div class="analytics-section">
         <div class="section-title">Tool Usage Distribution</div>
         ${this.renderToolUsageBars()}
       </div>
 
-      <!-- Session Duration -->
       <div class="analytics-section">
         <div class="section-title">Session Duration</div>
         ${this.renderSessionDurations(snapshots)}
       </div>
 
-      <!-- Threshold Setting -->
       <div class="analytics-section threshold-section">
         <div class="section-title">Alert Threshold</div>
         <div class="threshold-row">
           <span>$</span>
           <input type="number" id="cost-threshold" name="cost-threshold" autocomplete="off" value="${this.costThreshold}" min="0.1" step="0.5" />
-          <span class="threshold-status">${this.thresholdAlerted ? '⚠ Exceeded' : '✓ Under'}</span>
+          <span class="threshold-status">${this.thresholdAlerted ? 'Exceeded' : 'Under'}</span>
         </div>
       </div>
     `;
 
-    // Bind threshold input — only if not already focused (avoids disrupting user edits)
-    const thresholdInput = content.querySelector('#cost-threshold') as HTMLInputElement;
+    const thresholdInput = this.contentEl.querySelector('#cost-threshold') as HTMLInputElement;
     if (thresholdInput) {
       thresholdInput.addEventListener('change', () => {
         this.costThreshold = parseFloat(thresholdInput.value) || 5.0;
         this.thresholdAlerted = false;
       });
-      // Preserve focus if the user was editing the threshold before this render
       if (this.thresholdFocused) {
         thresholdInput.focus();
       }
@@ -381,7 +354,6 @@ export class AnalyticsPanel {
     const height = 50;
     const samples = this.tokenSamples;
 
-    // Calculate deltas (tokens per sample interval)
     const deltas: number[] = [];
     for (let i = 1; i < samples.length; i++) {
       deltas.push(Math.max(0, samples[i].totalTokens - samples[i - 1].totalTokens));
@@ -392,7 +364,6 @@ export class AnalyticsPanel {
     const maxDelta = Math.max(...deltas, 1);
     const stepX = width / Math.max(deltas.length - 1, 1);
 
-    // Build SVG path
     const points = deltas.map((d, i) => {
       const x = i * stepX;
       const y = height - (d / maxDelta) * (height - 4) - 2;
@@ -400,8 +371,6 @@ export class AnalyticsPanel {
     });
 
     const pathD = points.map((p, i) => (i === 0 ? `M${p}` : `L${p}`)).join(' ');
-
-    // Area fill path
     const areaD = `${pathD} L${((deltas.length - 1) * stepX).toFixed(1)},${height} L0,${height} Z`;
 
     return `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" class="velocity-spark">
@@ -421,7 +390,6 @@ export class AnalyticsPanel {
       return '<div class="analytics-empty">No tool usage data yet</div>';
     }
 
-    // Sort by count descending, take top 10
     const sorted = Array.from(this.toolCounts.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10);
@@ -430,7 +398,6 @@ export class AnalyticsPanel {
 
     return sorted.map(([tool, count]) => {
       const pct = maxCount > 0 ? (count / maxCount) * 100 : 0;
-      // Color based on tool type
       const color = tool.startsWith('mcp__') ? '#60a5fa' : '#a78bfa';
 
       return `<div class="tool-bar">
@@ -468,7 +435,7 @@ export class AnalyticsPanel {
   dispose(): void {
     clearInterval(this.refreshTimer);
     clearInterval(this.sampleTimer);
-    this.panelEl.remove();
+    this.contentEl.remove();
     this.alertEl?.remove();
   }
 }

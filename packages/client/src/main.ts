@@ -12,14 +12,14 @@ import { ZoneHeatmap } from './ui/zone-heatmap.js';
 import { CommandPalette } from './ui/command-palette.js';
 import { AnalyticsPanel } from './ui/analytics-panel.js';
 import { LayoutEditor, applySavedLayout } from './ui/layout-editor.js';
-import { StatsHud } from './ui/stats-hud.js';
+import { TopBar } from './ui/top-bar.js';
+import type { NavTab } from './ui/top-bar.js';
 import { ToastManager } from './ui/toast-manager.js';
 import { ShortcutsHelp } from './ui/shortcuts-help.js';
 import { SessionExport } from './ui/session-export.js';
 import { Onboarding } from './ui/onboarding.js';
 import { ZONE_MAP, AGENT_PALETTES } from '@agent-move/shared';
 
-// New feature imports
 import { AgentTrails } from './effects/agent-trails.js';
 import { Minimap } from './ui/minimap.js';
 import { LeaderboardPanel } from './ui/leaderboard-panel.js';
@@ -36,17 +36,16 @@ async function main() {
   // Init state store
   const store = new StateStore();
 
-  // ── Feature 5: Layout Editor ──
-  // Apply saved layout BEFORE WorldManager so ZoneRenderer picks up persisted positions
+  // Apply saved layout BEFORE WorldManager
   applySavedLayout();
 
   // Init world (zones, grid, camera)
   const world = new WorldManager(pixiApp);
 
-  // Init layout editor (after WorldManager so it can trigger redraws)
+  // Init layout editor
   const layoutEditor = new LayoutEditor(world);
 
-  // Init agent manager (bridges state -> rendering)
+  // Init agent manager
   const agentManager = new AgentManager(pixiApp, world, store);
 
   // Init audio
@@ -55,11 +54,16 @@ async function main() {
   agentManager.setSoundManager(sound);
   agentManager.setNotificationManager(notifications);
 
-  // Init overlay (HTML sidebar)
+  // ── Top Bar ──
+  const topBar = new TopBar(store);
+
+  // ── Right Panel: Overlay (agent list) ──
   const overlay = new Overlay(store);
 
-  // Init detail panel
+  // ── Detail Panel (renders inside right panel) ──
   const detailPanel = new AgentDetailPanel(store);
+
+  // Wire agent click from overlay -> detail panel
   overlay.setAgentClickHandler((agentId) => {
     detailPanel.open(agentId);
     agentManager.setFocusAgent(agentId);
@@ -67,7 +71,7 @@ async function main() {
     updateFocusIndicator();
   });
 
-  // ── Feature 1: Agent Click-to-Inspect ──
+  // Wire agent click from canvas -> detail panel
   agentManager.setClickHandler((agentId) => {
     detailPanel.open(agentId);
     agentManager.setFocusAgent(agentId);
@@ -81,15 +85,17 @@ async function main() {
     agentManager.rebuildFromState(agents);
   });
 
-  // ── Feature 1: Zone Activity Heatmap ──
+  // Zone heatmap
   const heatmap = new ZoneHeatmap(store);
   let heatmapVisible = true;
 
-  // ── Feature 3: Analytics Panel ──
-  const analytics = new AnalyticsPanel(store);
+  // ── Right Panel: Analytics & Leaderboard (swap with agent list) ──
+  const rightPanelContent = document.getElementById('right-panel-content')!;
+  const overlayEl = document.getElementById('overlay')!;
+  const rightPanelTitle = document.getElementById('right-panel-title')!;
 
-  // ── Stats HUD ──
-  const statsHud = new StatsHud(store);
+  const analytics = new AnalyticsPanel(store, rightPanelContent);
+  const leaderboard = new LeaderboardPanel(store, rightPanelContent);
 
   // ── Toast Notifications ──
   const toasts = new ToastManager(store);
@@ -100,22 +106,19 @@ async function main() {
   // ── Session Export ──
   const sessionExport = new SessionExport(store);
 
-  // ── Onboarding (first-time users) ──
+  // ── Onboarding ──
   const onboarding = new Onboarding();
 
-  // ── Feature 2: Agent Trails ──
+  // ── Agent Trails ──
   const trails = new AgentTrails();
   world.addEffect(trails.container);
 
-  // ── Feature 4: Mini-map ──
+  // ── Mini-map ──
   const minimap = new Minimap(world.camera, (wx, wy) => {
     world.camera.panTo(wx, wy);
   });
 
-  // ── Feature 5: Agent Performance Leaderboard ──
-  const leaderboard = new LeaderboardPanel(store);
-
-  // ── Feature 6: Agent Customization ──
+  // ── Agent Customization ──
   const customizer = new AgentCustomizer();
   const custLookup = (agent: import('@agent-move/shared').AgentState) => customizer.getCustomDisplay(agent);
   agentManager.setCustomizationLookup(custLookup);
@@ -128,31 +131,22 @@ async function main() {
     if (detailPanel.currentAgentId === agentId) {
       detailPanel.refreshHeader(data.displayName);
     }
-    // Re-render overlay to reflect name/color change
     overlay.scheduleRender();
   });
-  // Wire detail panel "Customize" button to open customizer
   detailPanel.setCustomizeHandler((agent) => {
     customizer.open(agent);
   });
-  // Wire right-click on agent sprites to open customizer
   pixiApp.canvas.addEventListener('contextmenu', (e) => {
-    e.preventDefault(); // prevent browser context menu on canvas
+    e.preventDefault();
   });
 
-  // ── Feature 9: Custom Themes ──
+  // ── Theme Manager ──
   const themeManager = new ThemeManager();
-  // Apply initial theme
   world.applyTheme(themeManager.current);
 
-  // Theme cycle button in zoom controls row
-  const themeBtn = document.createElement('button');
-  themeBtn.id = 'theme-cycle-btn';
+  const themeBtn = document.getElementById('theme-btn')!;
   themeBtn.title = `Theme: ${themeManager.current.name} (P)`;
-  themeBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-1 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>`;
-  document.getElementById('zoom-controls')!.appendChild(themeBtn);
   themeBtn.addEventListener('click', () => themeManager.cycleNext());
-
   themeManager.onChange((theme) => {
     world.applyTheme(theme);
     themeBtn.title = `Theme: ${theme.name} (P)`;
@@ -161,32 +155,63 @@ async function main() {
   // ── Focus Mode ──
   let focusModeActive = false;
 
-  // Focus indicator badge
-  const focusIndicator = document.createElement('div');
-  focusIndicator.id = 'focus-indicator';
-  focusIndicator.innerHTML = `<span class="fi-icon"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" style="vertical-align:-2px;opacity:0.8"><circle cx="12" cy="12" r="3"/><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 18a8 8 0 110-16 8 8 0 010 16z"/></svg></span> Following: <span class="fi-name"></span><span class="fi-hint">F to cycle &middot; Esc to exit</span>`;
-  document.getElementById('app')!.appendChild(focusIndicator);
-
   function updateFocusIndicator(): void {
     if (focusModeActive && agentManager.focusedAgentId) {
       const name = agentManager.getFocusedAgentName() || 'Agent';
-      focusIndicator.querySelector('.fi-name')!.textContent = name;
-      focusIndicator.classList.add('visible');
+      topBar.showFocus(name);
     } else {
-      focusIndicator.classList.remove('visible');
+      topBar.hideFocus();
     }
   }
 
-  // ── Feature 2: Command Palette ──
+  // Stop following button
+  document.getElementById('focus-stop')!.addEventListener('click', () => {
+    focusModeActive = false;
+    agentManager.setFocusAgent(null);
+    updateFocusIndicator();
+  });
+
+  // ── Panel State Management ──
+  let currentTab: NavTab = 'monitor';
+
+  function switchRightPanel(tab: NavTab): void {
+    // Hide previous content
+    if (currentTab === 'analytics') analytics.hide();
+    if (currentTab === 'leaderboard') leaderboard.hide();
+
+    currentTab = tab;
+
+    if (tab === 'monitor') {
+      // Show agent list, hide content area
+      overlayEl.style.display = '';
+      rightPanelContent.style.display = 'none';
+      rightPanelTitle.textContent = 'Agents';
+    } else {
+      // Close detail panel if open, hide agent list, show content area
+      if (detailPanel.isOpen()) detailPanel.close();
+      overlayEl.style.display = 'none';
+      rightPanelContent.style.display = '';
+      rightPanelTitle.textContent = tab === 'analytics' ? 'Analytics' : 'Leaderboard';
+
+      if (tab === 'analytics') analytics.show();
+      else leaderboard.show();
+    }
+  }
+
+  // Tab switching
+  topBar.setTabChangeHandler((tab: NavTab) => {
+    switchRightPanel(tab);
+  });
+
+  const rightPanel = document.getElementById('right-panel')!;
+
+  // ── Command Palette ──
   const commandPalette = new CommandPalette(store, (action, payload) => {
     switch (action) {
       case 'focus-zone': {
         const zone = ZONE_MAP.get(payload);
         if (zone) {
-          world.camera.panTo(
-            zone.x + zone.width / 2,
-            zone.y + zone.height / 2
-          );
+          world.camera.panTo(zone.x + zone.width / 2, zone.y + zone.height / 2);
         }
         break;
       }
@@ -218,10 +243,13 @@ async function main() {
         if (heatmapEl) heatmapEl.style.display = heatmapVisible ? 'block' : 'none';
         break;
       case 'toggle-analytics':
-        analytics.toggle();
+        if (currentTab === 'analytics') {
+          topBar.setActiveTab('monitor');
+        } else {
+          topBar.setActiveTab('analytics');
+        }
         break;
       case 'timeline-live':
-        // Timeline handles its own live mode
         break;
       case 'toggle-shortcuts':
         shortcutsHelp.toggle();
@@ -249,7 +277,11 @@ async function main() {
         minimap.toggle();
         break;
       case 'toggle-leaderboard':
-        leaderboard.toggle();
+        if (currentTab === 'leaderboard') {
+          topBar.setActiveTab('monitor');
+        } else {
+          topBar.setActiveTab('leaderboard');
+        }
         break;
       case 'cycle-theme':
         themeManager.cycleNext();
@@ -257,10 +289,9 @@ async function main() {
     }
   });
 
-  // Wire command palette customization lookup (after commandPalette is created)
   commandPalette.setCustomizationLookup(custLookup);
 
-  // Clean up trails when agents shut down
+  // Clean up trails on agent shutdown
   store.on('agent:shutdown', (agentId: string) => {
     trails.removeAgent(agentId);
   });
@@ -274,42 +305,22 @@ async function main() {
   document.getElementById('zoom-out')!.addEventListener('click', () => world.camera.zoomOut());
   document.getElementById('zoom-reset')!.addEventListener('click', () => world.resetCamera());
 
-  // Audio controls
+  // Audio controls (mute button in top bar)
   const muteBtn = document.getElementById('mute-btn')!;
-  const volumeSlider = document.getElementById('volume-slider') as HTMLInputElement;
-  const volumeLabel = document.getElementById('volume-label')!;
-
   muteBtn.addEventListener('click', () => {
-    sound.init(); // Unlock AudioContext on first user gesture
+    sound.init();
     sound.muted = !sound.muted;
     muteBtn.textContent = sound.muted ? '\u{1F507}' : '\u{1F508}';
     muteBtn.classList.toggle('muted', sound.muted);
   });
 
-  volumeSlider.addEventListener('input', () => {
-    sound.init(); // Unlock AudioContext on first user gesture
-    const val = parseInt(volumeSlider.value, 10);
-    sound.volume = val / 100;
-    volumeLabel.textContent = `${val}%`;
-  });
-
-  // Analytics button in sidebar
-  const analyticsBtn = document.getElementById('analytics-btn');
-  analyticsBtn?.addEventListener('click', () => {
-    analytics.toggle();
-    analyticsBtn.classList.toggle('active', !analyticsBtn.classList.contains('active'));
-  });
-
-  // Leaderboard button in sidebar
-  const leaderboardBtn = document.getElementById('leaderboard-btn');
-  leaderboardBtn?.addEventListener('click', () => {
-    leaderboard.toggle();
-    leaderboardBtn.classList.toggle('active', !leaderboardBtn.classList.contains('active'));
+  // Shortcuts button
+  document.getElementById('shortcuts-btn')!.addEventListener('click', () => {
+    shortcutsHelp.toggle();
   });
 
   // Command palette hint button
-  const cmdHintBtn = document.getElementById('cmd-hint');
-  cmdHintBtn?.addEventListener('click', () => {
+  document.getElementById('cmd-hint')!.addEventListener('click', () => {
     commandPalette.toggle();
   });
 
@@ -321,16 +332,17 @@ async function main() {
 
   // ── Global keyboard shortcuts ──
   document.addEventListener('keydown', (e) => {
-    // Skip if typing in an input
     const tag = (e.target as HTMLElement)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-    // Skip if modifier keys (Ctrl+K handled by command palette)
     if (e.ctrlKey || e.metaKey || e.altKey) return;
 
     switch (e.key) {
       case 'a':
-        analytics.toggle();
-        analyticsBtn?.classList.toggle('active');
+        if (currentTab === 'analytics') {
+          topBar.setActiveTab('monitor');
+        } else {
+          topBar.setActiveTab('analytics');
+        }
         break;
       case 'h':
         heatmapVisible = !heatmapVisible;
@@ -366,7 +378,6 @@ async function main() {
           updateFocusIndicator();
         }
         break;
-      // New feature shortcuts
       case 't':
         trails.toggle();
         break;
@@ -377,8 +388,11 @@ async function main() {
         minimap.toggle();
         break;
       case 'l':
-        leaderboard.toggle();
-        leaderboardBtn?.classList.toggle('active');
+        if (currentTab === 'leaderboard') {
+          topBar.setActiveTab('monitor');
+        } else {
+          topBar.setActiveTab('leaderboard');
+        }
         break;
       case 'p':
         themeManager.cycleNext();
@@ -392,16 +406,13 @@ async function main() {
     agentManager.update(dt);
     world.update(dt);
 
-    // Update heatmap overlay position to match camera
     const root = world.root;
     if (heatmapVisible) {
       heatmap.updateTransform(root.x, root.y, root.scale.x);
     }
 
-    // Update layout editor overlay position to match camera
     layoutEditor.updateTransform(root.x, root.y, root.scale.x);
 
-    // Focus mode: smoothly follow agent
     if (focusModeActive) {
       const pos = agentManager.getFocusedAgentPosition();
       if (pos) {
@@ -409,7 +420,6 @@ async function main() {
       }
     }
 
-    // Update agent trails
     if (trails.enabled) {
       const colorMap = new Map<string, number>();
       for (const p of agentManager.getAgentPositions()) {
@@ -420,7 +430,6 @@ async function main() {
       trails.update(dt, colorMap);
     }
 
-    // Update minimap
     if (minimap.visible) {
       const viewport = world.camera.getViewport();
       const agents = agentManager.getAgentPositions();
@@ -428,7 +437,7 @@ async function main() {
     }
   });
 
-  console.log('Claude Code Visualizer started');
+  console.log('AgentMove started');
 }
 
 main().catch(console.error);

@@ -98,7 +98,7 @@ export class Timeline {
         <canvas id="timeline-canvas"></canvas>
       </div>
     `;
-    document.getElementById('app')!.appendChild(this.el);
+    (document.getElementById('canvas-container') ?? document.getElementById('app')!).appendChild(this.el);
 
     this.canvas = this.el.querySelector('#timeline-canvas')! as HTMLCanvasElement;
     this.ctx = this.canvas.getContext('2d')!;

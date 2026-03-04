@@ -21,15 +21,19 @@ export class AgentDetailPanel {
   constructor(store: StateStore) {
     this.store = store;
 
-    // Create panel element
+    // Create panel element — inside right panel for in-place rendering
     this.panelEl = document.createElement('div');
     this.panelEl.id = 'agent-detail-panel';
     this.panelEl.innerHTML = `
       <div class="detail-header">
         <div class="detail-header-buttons">
+          <button id="detail-back" title="Back to agent list">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+            Back
+          </button>
+          <span class="detail-btn-spacer"></span>
           <button id="detail-customize" title="Customize this agent">Edit</button>
           <button id="detail-kill" title="Remove this agent">Kill</button>
-          <button id="detail-close">&times;</button>
         </div>
         <div id="detail-name"></div>
         <div id="detail-task"></div>
@@ -40,15 +44,20 @@ export class AgentDetailPanel {
       <div class="detail-section-title">Activity Feed</div>
       <div id="detail-feed"></div>
     `;
-    document.body.appendChild(this.panelEl);
+    const rightPanel = document.getElementById('right-panel');
+    if (rightPanel) {
+      rightPanel.appendChild(this.panelEl);
+    } else {
+      document.body.appendChild(this.panelEl);
+    }
 
     this.diffModal = new DiffViewerModal();
 
-    // Close button
-    this.panelEl.querySelector('#detail-close')!.addEventListener('click', () => this.close());
+    // Back button
+    this.panelEl.querySelector('#detail-back')!.addEventListener('click', () => this.close());
 
-    // Kill button
-    this.panelEl.querySelector('#detail-kill')!.addEventListener('click', () => this.killAgent());
+    // Kill button — with confirmation
+    this.panelEl.querySelector('#detail-kill')!.addEventListener('click', () => this.showKillConfirm());
 
     // Customize button
     this.panelEl.querySelector('#detail-customize')!.addEventListener('click', () => {
@@ -380,6 +389,39 @@ export class AgentDetailPanel {
       default:
         return '';
     }
+  }
+
+  private showKillConfirm(): void {
+    if (!this.selectedAgentId) return;
+    const agent = this.store.getAgent(this.selectedAgentId);
+    const name = agent ? this.getDisplayName(agent) : 'this agent';
+
+    // Remove any existing confirm overlay
+    this.panelEl.querySelector('.kill-confirm-overlay')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'kill-confirm-overlay';
+    overlay.innerHTML = `
+      <div class="kill-confirm-box">
+        <div class="kill-confirm-title">Kill Agent</div>
+        <div class="kill-confirm-msg">Are you sure you want to shut down <strong>${escapeAttr(name)}</strong>? This cannot be undone.</div>
+        <div class="kill-confirm-actions">
+          <button class="kill-confirm-cancel">Cancel</button>
+          <button class="kill-confirm-yes">Kill Agent</button>
+        </div>
+      </div>
+    `;
+    this.panelEl.appendChild(overlay);
+
+    overlay.querySelector('.kill-confirm-cancel')!.addEventListener('click', () => overlay.remove());
+    overlay.querySelector('.kill-confirm-yes')!.addEventListener('click', async () => {
+      overlay.remove();
+      await this.killAgent();
+    });
+    // Click on backdrop to dismiss
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
   }
 
   private async killAgent(): Promise<void> {

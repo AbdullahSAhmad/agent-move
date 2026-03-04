@@ -3,70 +3,63 @@ import { AGENT_PALETTES, getModelPricing } from '@agent-move/shared';
 import type { StateStore } from '../connection/state-store.js';
 import { escapeHtml, formatTokens, formatDuration } from '../utils/formatting.js';
 
-const RANK_BADGES = ['🥇', '🥈', '🥉'];
+const RANK_BADGES = ['\u{1F947}', '\u{1F948}', '\u{1F949}'];
 
 export class LeaderboardPanel {
-  private el: HTMLElement;
-  private isOpen = false;
+  private contentEl: HTMLElement;
+  private containerEl: HTMLElement;
+  private isVisible = false;
   private refreshInterval: ReturnType<typeof setInterval> | null = null;
   private sortColumn: 'tokens' | 'cost' | 'duration' | 'tools' | 'velocity' = 'tokens';
   private sortDir: 'asc' | 'desc' = 'desc';
   private _customizationLookup: ((agent: AgentState) => { displayName: string; colorIndex: number }) | null = null;
 
-  /** Set a lookup function to resolve customized display name + color from agent state */
   setCustomizationLookup(lookup: (agent: AgentState) => { displayName: string; colorIndex: number }): void {
     this._customizationLookup = lookup;
   }
 
-  constructor(private store: StateStore) {
-    this.el = document.createElement('div');
-    this.el.id = 'leaderboard-panel';
-    this.el.innerHTML = `
-      <div class="lb-header">
-        <span class="lb-title">🏆 Agent Leaderboard</span>
-        <button class="lb-close">&times;</button>
-      </div>
-      <div class="lb-body"></div>
-    `;
-    document.body.appendChild(this.el);
+  constructor(private store: StateStore, container: HTMLElement) {
+    this.containerEl = container;
 
-    this.el.querySelector('.lb-close')!.addEventListener('click', () => this.close());
+    this.contentEl = document.createElement('div');
+    this.contentEl.id = 'leaderboard-content';
+    this.contentEl.style.display = 'none';
+    this.containerEl.appendChild(this.contentEl);
   }
 
-  toggle(): void {
-    if (this.isOpen) this.close();
-    else this.open();
-  }
-
-  open(): void {
-    this.isOpen = true;
-    this.el.classList.add('open');
+  show(): void {
+    this.isVisible = true;
+    this.contentEl.style.display = '';
     this.render();
     this.refreshInterval = setInterval(() => this.render(), 1000);
   }
 
-  close(): void {
-    this.isOpen = false;
-    this.el.classList.remove('open');
+  hide(): void {
+    this.isVisible = false;
+    this.contentEl.style.display = 'none';
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval);
       this.refreshInterval = null;
     }
   }
 
+  /** Legacy toggle for command palette compatibility */
+  toggle(): void {
+    if (this.isVisible) this.hide();
+    else this.show();
+  }
+
   private computeCost(agent: AgentState): number {
     const pricing = getModelPricing(agent.model ?? '');
-    // Cache tokens are priced at reduced input rate (~10% of input cost)
     const cacheInputCost = agent.cacheReadTokens * pricing.input * 0.1;
     return (agent.totalInputTokens * pricing.input + agent.totalOutputTokens * pricing.output + cacheInputCost) / 1_000_000;
   }
 
   private render(): void {
-    const body = this.el.querySelector('.lb-body')!;
     const agents = Array.from(this.store.getAgents().values());
 
     if (agents.length === 0) {
-      body.innerHTML = '<div class="lb-empty">No agents active</div>';
+      this.contentEl.innerHTML = '<div class="lb-empty">No agents active</div>';
       return;
     }
 
@@ -79,7 +72,6 @@ export class LeaderboardPanel {
       return { ...a, cost, duration, velocity };
     });
 
-    // Sort
     rows.sort((a, b) => {
       let va: number, vb: number;
       switch (this.sortColumn) {
@@ -94,7 +86,7 @@ export class LeaderboardPanel {
 
     const maxTokens = Math.max(...rows.map(r => r.totalInputTokens + r.totalOutputTokens), 1);
 
-    body.innerHTML = `
+    this.contentEl.innerHTML = `
       <table class="lb-table">
         <thead>
           <tr>
@@ -137,7 +129,7 @@ export class LeaderboardPanel {
     `;
 
     // Bind sort handlers
-    body.querySelectorAll('.lb-sortable').forEach(el => {
+    this.contentEl.querySelectorAll('.lb-sortable').forEach(el => {
       el.addEventListener('click', () => {
         const col = (el as HTMLElement).dataset.col as typeof this.sortColumn;
         if (this.sortColumn === col) {
@@ -153,6 +145,6 @@ export class LeaderboardPanel {
 
   dispose(): void {
     if (this.refreshInterval) clearInterval(this.refreshInterval);
-    this.el.remove();
+    this.contentEl.remove();
   }
 }
