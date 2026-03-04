@@ -131,7 +131,9 @@ export class TopBar {
     for (const a of agents) {
       const pricing = getModelPricing(a.model);
       totalCost += (a.totalInputTokens / 1_000_000) * pricing.input +
-                   (a.totalOutputTokens / 1_000_000) * pricing.output;
+                   (a.totalOutputTokens / 1_000_000) * pricing.output +
+                   (a.cacheReadTokens / 1_000_000) * pricing.input * 0.1 +
+                   (a.cacheCreationTokens / 1_000_000) * pricing.input * 1.25;
     }
 
     const velocity = this.getVelocity();

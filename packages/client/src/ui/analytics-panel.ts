@@ -140,7 +140,9 @@ export class AnalyticsPanel {
   private calculateCost(agent: AgentSnapshot): number {
     const pricing = getModelPricing(agent.model);
     return (agent.inputTokens / 1_000_000) * pricing.input +
-           (agent.outputTokens / 1_000_000) * pricing.output;
+           (agent.outputTokens / 1_000_000) * pricing.output +
+           (agent.cacheReadTokens / 1_000_000) * pricing.input * 0.1 +
+           (agent.cacheCreationTokens / 1_000_000) * pricing.input * 1.25;
   }
 
   private getTokenVelocity(): number {
@@ -221,12 +223,6 @@ export class AnalyticsPanel {
     const avgPricing = getModelPricing(snapshots[0]?.model ?? null);
     const cacheSavings = (totalCacheRead / 1_000_000) * avgPricing.input * 0.9;
 
-    const zoneCosts = new Map<ZoneId, number>();
-    for (const a of snapshots) {
-      const cost = this.calculateCost(a);
-      zoneCosts.set(a.zone, (zoneCosts.get(a.zone) ?? 0) + cost);
-    }
-
     const sortedAgents = [...snapshots].sort(
       (a, b) => this.calculateCost(b) - this.calculateCost(a)
     );
@@ -238,7 +234,7 @@ export class AnalyticsPanel {
         <div class="analytics-card total-cost">
           <div class="card-label">Total Cost</div>
           <div class="card-value">$${totalCost.toFixed(4)}</div>
-          <div class="card-sub">${formatTokens(totalInput)} in / ${formatTokens(totalOutput)} out</div>
+          <div class="card-sub">${formatTokens(allInput)} in / ${formatTokens(totalOutput)} out</div>
         </div>
         <div class="analytics-card velocity">
           <div class="card-label">Token Velocity</div>
@@ -266,11 +262,6 @@ export class AnalyticsPanel {
       <div class="analytics-section">
         <div class="section-title">Cost by Agent</div>
         ${sortedAgents.length > 0 ? sortedAgents.map((a) => this.renderAgentBar(a, totalCost)).join('') : '<div class="analytics-empty">No agents active</div>'}
-      </div>
-
-      <div class="analytics-section">
-        <div class="section-title">Cost by Zone (current)</div>
-        ${this.renderZoneBars(zoneCosts, totalCost)}
       </div>
 
       <div class="analytics-section">
@@ -328,31 +319,6 @@ export class AnalyticsPanel {
         <div class="agent-bar-fill" style="width:${Math.max(2, pct)}%;background:${color}"></div>
       </div>
     </div>`;
-  }
-
-  private renderZoneBars(zoneCosts: Map<ZoneId, number>, totalCost: number): string {
-    const entries = Array.from(zoneCosts.entries())
-      .sort((a, b) => b[1] - a[1]);
-
-    if (entries.length === 0) {
-      return '<div class="analytics-empty">No zone data yet</div>';
-    }
-
-    return entries.map(([zoneId, cost]) => {
-      const zone = ZONE_MAP.get(zoneId);
-      const pct = totalCost > 0 ? (cost / totalCost) * 100 : 0;
-      const color = zone ? hexToCss(zone.color) : '#666';
-
-      return `<div class="zone-bar">
-        <div class="zone-bar-label">
-          <span>${zone?.icon ?? ''} ${zone?.label ?? zoneId}</span>
-          <span class="zone-bar-cost">$${cost.toFixed(4)} (${pct.toFixed(0)}%)</span>
-        </div>
-        <div class="zone-bar-track">
-          <div class="zone-bar-fill" style="width:${Math.max(2, pct)}%;background:${color}"></div>
-        </div>
-      </div>`;
-    }).join('');
   }
 
   private renderZoneTimeBars(): string {
