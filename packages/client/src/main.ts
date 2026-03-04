@@ -144,12 +144,12 @@ async function main() {
   const themeManager = new ThemeManager();
   world.applyTheme(themeManager.current);
 
-  const themeBtn = document.getElementById('theme-btn')!;
-  themeBtn.title = `Theme: ${themeManager.current.name} (P)`;
-  themeBtn.addEventListener('click', () => themeManager.cycleNext());
+  const themeSelect = document.getElementById('theme-select') as HTMLSelectElement;
+  themeSelect.value = themeManager.current.id;
+  themeSelect.addEventListener('change', () => themeManager.setTheme(themeSelect.value));
   themeManager.onChange((theme) => {
     world.applyTheme(theme);
-    themeBtn.title = `Theme: ${theme.name} (P)`;
+    themeSelect.value = theme.id;
   });
 
   // ── Focus Mode ──

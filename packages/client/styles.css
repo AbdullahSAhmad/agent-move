@@ -239,6 +239,21 @@ canvas { display: block; }
 .tb-actions button:hover { background: var(--surface-hover); color: var(--text-primary); }
 .tb-actions button.muted { color: var(--error); }
 
+#theme-select {
+  height: var(--btn-height-sm);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+  font-family: var(--font-ui);
+  cursor: pointer;
+  padding: 0 6px;
+  outline: none;
+}
+#theme-select:hover { background: var(--surface-hover); color: var(--text-primary); }
+#theme-select:focus { border-color: var(--accent); }
+
 /* ═══════════════════════════════════════════
    FOCUS SUB-BAR (below top bar)
    ═══════════════════════════════════════════ */

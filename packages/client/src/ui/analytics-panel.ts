@@ -211,8 +211,8 @@ export class AnalyticsPanel {
     const trendIcon = trend === 'up' ? '\u2191' : trend === 'down' ? '\u2193' : '\u2192';
     const trendColor = trend === 'up' ? '#f87171' : trend === 'down' ? '#4ade80' : '#888';
 
-    const cacheTotal = totalInput + totalCacheRead;
-    const cacheHitRate = cacheTotal > 0 ? (totalCacheRead / cacheTotal) * 100 : 0;
+    const allInput = totalInput + totalCacheRead + totalCacheCreation;
+    const cacheHitRate = allInput > 0 ? (totalCacheRead / allInput) * 100 : 0;
     const avgPricing = getModelPricing(snapshots[0]?.model ?? null);
     const cacheSavings = (totalCacheRead / 1_000_000) * avgPricing.input * 0.9;
 
@@ -247,7 +247,7 @@ export class AnalyticsPanel {
         </div>
         <div class="analytics-card cache-card">
           <div class="card-label">Cache Efficiency</div>
-          <div class="card-value">${cacheHitRate.toFixed(1)}<span class="card-unit">%</span></div>
+          <div class="card-value">${Math.min(cacheHitRate, 100).toFixed(1)}<span class="card-unit">%</span></div>
           <div class="card-sub">${formatTokens(totalCacheRead)} read / ${formatTokens(totalCacheCreation)} created</div>
           <div class="cache-savings">~$${cacheSavings.toFixed(4)} saved</div>
         </div>
