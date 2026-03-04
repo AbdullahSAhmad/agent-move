@@ -53,7 +53,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     shortcuts: [
       { keys: 'T', description: 'Toggle agent trails' },
       { keys: 'N', description: 'Toggle day/night cycle' },
-      { keys: 'Tab', description: 'Toggle mini-map' },
+      { keys: '`', description: 'Toggle mini-map' },
       { keys: 'L', description: 'Toggle leaderboard' },
       { keys: 'P', description: 'Cycle theme' },
     ],

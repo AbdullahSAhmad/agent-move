@@ -164,7 +164,7 @@ async function main() {
   // Focus indicator badge
   const focusIndicator = document.createElement('div');
   focusIndicator.id = 'focus-indicator';
-  focusIndicator.innerHTML = `<span class="fi-icon">&#127919;</span> Following: <span class="fi-name"></span><span class="fi-hint">F to cycle &middot; Esc to exit</span>`;
+  focusIndicator.innerHTML = `<span class="fi-icon"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" style="vertical-align:-2px;opacity:0.8"><circle cx="12" cy="12" r="3"/><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 18a8 8 0 110-16 8 8 0 010 16z"/></svg></span> Following: <span class="fi-name"></span><span class="fi-hint">F to cycle &middot; Esc to exit</span>`;
   document.getElementById('app')!.appendChild(focusIndicator);
 
   function updateFocusIndicator(): void {
@@ -373,8 +373,7 @@ async function main() {
       case 'n':
         world.dayNight.toggle();
         break;
-      case 'Tab':
-        e.preventDefault();
+      case '`':
         minimap.toggle();
         break;
       case 'l':

@@ -27,6 +27,7 @@ export class ToastManager {
     // Container anchored at bottom-left
     this.containerEl = document.createElement('div');
     this.containerEl.id = 'toast-container';
+    this.containerEl.setAttribute('aria-live', 'polite');
     document.body.appendChild(this.containerEl);
 
     // Listen for events

@@ -54,8 +54,8 @@ export class CommandPalette {
       <div class="cmd-backdrop"></div>
       <div class="cmd-modal">
         <div class="cmd-input-wrap">
-          <span class="cmd-icon">&#128269;</span>
-          <input type="text" class="cmd-input" placeholder="Search commands, agents, zones..." />
+          <span class="cmd-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" opacity="0.5"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg></span>
+          <input type="text" class="cmd-input" placeholder="Search commands, agents, zones\u2026" autocomplete="off" />
           <kbd class="cmd-kbd">ESC</kbd>
         </div>
         <div class="cmd-list"></div>
@@ -204,7 +204,7 @@ export class CommandPalette {
     this.actions.push({
       id: 'feature:minimap',
       label: 'Toggle Mini-map',
-      description: 'Overview navigation map (Tab)',
+      description: 'Overview navigation map (`)',
       icon: '🗺',
       category: 'feature',
       action: () => this.onCommand('toggle-minimap'),

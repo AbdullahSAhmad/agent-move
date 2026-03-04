@@ -284,7 +284,7 @@ export class Overlay {
       const isCollapsed = this.collapsedGroups.has(groupId);
 
       html += `<div class="agent-group${isCollapsed ? ' collapsed' : ''}">`;
-      html += `<div class="group-header" data-group-id="${escapeAttr(groupId)}">
+      html += `<div class="group-header" role="button" tabindex="0" data-group-id="${escapeAttr(groupId)}">
         <span class="group-chevron">${isCollapsed ? '&#9656;' : '&#9662;'}</span>
         <span class="group-icon">&#128101;</span>
         <span class="group-name">${escapeHtml(teamName)}</span>
@@ -319,6 +319,17 @@ export class Overlay {
       el.addEventListener('click', () => {
         const groupId = (el as HTMLElement).dataset.groupId;
         if (groupId) this.toggleGroup(groupId);
+      });
+    });
+
+    // Keyboard support for group headers
+    this.agentListEl.querySelectorAll('.group-header').forEach(el => {
+      el.addEventListener('keydown', (e) => {
+        if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+          (e as KeyboardEvent).preventDefault();
+          const groupId = (el as HTMLElement).dataset.groupId;
+          if (groupId) this.toggleGroup(groupId);
+        }
       });
     });
 

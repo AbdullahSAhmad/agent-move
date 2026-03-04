@@ -61,7 +61,7 @@ export class AnalyticsPanel {
     this.panelEl.innerHTML = `
       <div class="analytics-header">
         <button id="analytics-close">&times;</button>
-        <div class="analytics-title">📊 Analytics & Cost Tracker</div>
+        <div class="analytics-title"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="vertical-align:-2px;margin-right:6px;opacity:0.7"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>Analytics &amp; Cost Tracker</div>
       </div>
       <div id="analytics-content"></div>
     `;
@@ -307,7 +307,7 @@ export class AnalyticsPanel {
         <div class="section-title">Alert Threshold</div>
         <div class="threshold-row">
           <span>$</span>
-          <input type="number" id="cost-threshold" value="${this.costThreshold}" min="0.1" step="0.5" />
+          <input type="number" id="cost-threshold" name="cost-threshold" autocomplete="off" value="${this.costThreshold}" min="0.1" step="0.5" />
           <span class="threshold-status">${this.thresholdAlerted ? '⚠ Exceeded' : '✓ Under'}</span>
         </div>
       </div>

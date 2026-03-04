@@ -28,6 +28,7 @@ export class StatsHud {
 
     this.el = document.createElement('div');
     this.el.id = 'stats-hud';
+    this.el.setAttribute('aria-live', 'polite');
     this.el.innerHTML = `
       <span class="hud-item" id="hud-active"><span class="hud-dot active"></span><span class="hud-val">0</span> active</span>
       <span class="hud-sep"></span>
