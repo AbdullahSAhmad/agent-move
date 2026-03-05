@@ -1,4 +1,4 @@
-import type { AgentState, ServerMessage, ActivityEntry, TimelineEvent } from '@agent-move/shared';
+import type { AgentState, ServerMessage, ActivityEntry, TimelineEvent, AnomalyEvent, ToolChainData, TaskGraphData } from '@agent-move/shared';
 import type { WsClient } from './ws-client.js';
 
 export type ConnectionStatus = 'connected' | 'disconnected';
@@ -11,7 +11,10 @@ export type StoreEventType =
   | 'agent:history'
   | 'state:reset'
   | 'connection:status'
-  | 'timeline:snapshot';
+  | 'timeline:snapshot'
+  | 'anomaly:alert'
+  | 'toolchain:snapshot'
+  | 'taskgraph:snapshot';
 
 type StoreEventData = {
   'agent:spawn': AgentState;
@@ -22,6 +25,9 @@ type StoreEventData = {
   'state:reset': Map<string, AgentState>;
   'connection:status': ConnectionStatus;
   'timeline:snapshot': TimelineEvent[];
+  'anomaly:alert': AnomalyEvent;
+  'toolchain:snapshot': ToolChainData;
+  'taskgraph:snapshot': TaskGraphData;
 };
 
 type Listener<T extends StoreEventType> = (data: StoreEventData[T]) => void;
@@ -51,6 +57,14 @@ export class StateStore {
 
   requestHistory(agentId: string): void {
     this.wsClient?.send({ type: 'request:history', agentId });
+  }
+
+  requestToolChain(): void {
+    this.wsClient?.send({ type: 'request:toolchain' });
+  }
+
+  requestTaskGraph(): void {
+    this.wsClient?.send({ type: 'request:taskgraph' });
   }
 
   getTimeline(): TimelineEvent[] {
@@ -142,6 +156,21 @@ export class StateStore {
       case 'timeline:snapshot': {
         this._timeline = msg.events;
         this.emit('timeline:snapshot', msg.events);
+        break;
+      }
+
+      case 'anomaly:alert': {
+        this.emit('anomaly:alert', msg.anomaly);
+        break;
+      }
+
+      case 'toolchain:snapshot': {
+        this.emit('toolchain:snapshot', msg.data);
+        break;
+      }
+
+      case 'taskgraph:snapshot': {
+        this.emit('taskgraph:snapshot', msg.data);
         break;
       }
     }

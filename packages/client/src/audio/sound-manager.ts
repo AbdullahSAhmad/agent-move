@@ -3,7 +3,7 @@
  * No audio files needed — all sounds are generated programmatically.
  */
 
-export type SoundEvent = 'spawn' | 'zone-change' | 'tool-use' | 'idle' | 'shutdown';
+export type SoundEvent = 'spawn' | 'zone-change' | 'tool-use' | 'idle' | 'shutdown' | 'input-needed';
 
 export class SoundManager {
   private ctx: AudioContext | null = null;
@@ -79,6 +79,9 @@ export class SoundManager {
         break;
       case 'shutdown':
         this.playShutdown(ctx);
+        break;
+      case 'input-needed':
+        this.playInputNeeded(ctx);
         break;
     }
   }
@@ -172,6 +175,31 @@ export class SoundManager {
       osc.connect(g).connect(ctx.destination);
       osc.start(now + i * 0.12);
       osc.stop(now + i * 0.12 + 0.35);
+    });
+  }
+
+  /** Attention-grabbing two-tone alert — agent needs user input */
+  private playInputNeeded(ctx: AudioContext): void {
+    const now = ctx.currentTime;
+    const vol = this.gain() * 0.3;
+
+    // Two-tone doorbell: ding-dong pattern
+    const tones = [
+      { freq: 880, start: 0, type: 'sine' as OscillatorType },
+      { freq: 660, start: 0.15, type: 'sine' as OscillatorType },
+    ];
+
+    tones.forEach(({ freq, start, type }) => {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = type;
+      osc.frequency.value = freq;
+      g.gain.setValueAtTime(0, now + start);
+      g.gain.linearRampToValueAtTime(vol, now + start + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, now + start + 0.25);
+      osc.connect(g).connect(ctx.destination);
+      osc.start(now + start);
+      osc.stop(now + start + 0.3);
     });
   }
 }

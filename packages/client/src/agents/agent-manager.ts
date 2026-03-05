@@ -1,6 +1,6 @@
 import { Application } from 'pixi.js';
 import type { AgentState, ZoneId } from '@agent-move/shared';
-import { AGENT_PALETTES, ZONE_MAP } from '@agent-move/shared';
+import { AGENT_PALETTES, ZONE_MAP, getFunnyName } from '@agent-move/shared';
 import type { StateStore } from '../connection/state-store.js';
 import type { WorldManager } from '../world/world-manager.js';
 import { AgentSprite, type SpeechMessage } from './agent-sprite.js';
@@ -14,6 +14,8 @@ import type { NotificationManager } from '../audio/notification-manager.js';
 interface ManagedAgent {
   sprite: AgentSprite;
   state: AgentState;
+  /** Whether we already notified for this agent's waiting state (avoid spamming) */
+  notifiedWaiting: boolean;
 }
 
 /** Tool name -> icon mapping for speech bubbles */
@@ -84,7 +86,7 @@ export class AgentManager {
     if (this._customizationLookup) {
       return this._customizationLookup(agent).displayName;
     }
-    return agent.agentName || agent.projectName || agent.id.slice(0, 8);
+    return agent.agentName || getFunnyName(agent.sessionId);
   }
 
   /** Get the effective color index for an agent, respecting customizations */
@@ -122,6 +124,14 @@ export class AgentManager {
     this.store.on('agent:idle', this.onIdleBound);
     this.store.on('agent:shutdown', this.onShutdownBound);
     this.store.on('state:reset', this.onResetBound);
+
+    // Anomaly badge on sprites
+    this.store.on('anomaly:alert', (anomaly) => {
+      const managed = this.agents.get(anomaly.agentId);
+      if (managed) {
+        managed.sprite.setAnomaly(anomaly.kind);
+      }
+    });
   }
 
   /** Build rich speech messages from agent state */
@@ -230,7 +240,12 @@ export class AgentManager {
       sprite.rebuildTextures(customPalette, displayColorIndex, this.app.renderer);
     }
 
-    this.agents.set(agent.id, { sprite, state: agent });
+    // Set project name label
+    if (agent.projectName) {
+      sprite.setProjectName(agent.projectName);
+    }
+
+    this.agents.set(agent.id, { sprite, state: agent, notifiedWaiting: false });
     this.world.addAgent(sprite.container);
 
     // Move to the agent's current zone
@@ -269,6 +284,18 @@ export class AgentManager {
 
     managed.sprite.setIdle(false);
     managed.sprite.setPlanning(agent.isPlanning);
+
+    // Waiting for user input — badge, sound, and notification
+    managed.sprite.setWaiting(agent.isWaitingForUser);
+    if (agent.isWaitingForUser && !managed.notifiedWaiting) {
+      managed.notifiedWaiting = true;
+      this.sound?.play('input-needed');
+      this.notifications?.notifyInputNeeded(this.getDisplayName(agent));
+      this.updateDocTitle();
+    } else if (!agent.isWaitingForUser) {
+      managed.notifiedWaiting = false;
+      this.updateDocTitle();
+    }
 
     // Done agents get checkmark badge, sparkles, and slight dim
     if (agent.isDone) {
@@ -343,7 +370,10 @@ export class AgentManager {
     const target = this.getZonePosition('idle', agent.id);
     managed.sprite.moveTo(target.x, target.y);
     managed.sprite.setIdle(true);
+    managed.sprite.setWaiting(false);
     managed.sprite.clearSpeech();
+    managed.notifiedWaiting = false;
+    this.updateDocTitle();
 
     this.sound?.play('idle');
     this.notifications?.notifyIdle(this.getDisplayName(agent));
@@ -364,6 +394,7 @@ export class AgentManager {
       managed.sprite.destroy();
       this.agents.delete(agentId);
       this.updateChildBadges();
+      this.updateDocTitle();
     });
   }
 
@@ -396,6 +427,7 @@ export class AgentManager {
         managed.sprite.spawnAnimTimer = 0;
         managed.sprite.container.scale.set(1);
         managed.sprite.setIdle(agent.isIdle);
+        managed.sprite.setWaiting(agent.isWaitingForUser);
         if (agent.isDone) {
           managed.sprite.setDone(true);
           managed.sprite.container.alpha = 0.65;
@@ -493,6 +525,21 @@ export class AgentManager {
     this.world.update(deltaMs);
   }
 
+  /** Update document title based on waiting agent count */
+  private updateDocTitle(): void {
+    let waitingCount = 0;
+    for (const managed of this.agents.values()) {
+      if (managed.state.isWaitingForUser) waitingCount++;
+    }
+    const baseTitle = 'Agent Move';
+    if (waitingCount > 0) {
+      const prefix = waitingCount === 1 ? '\u{26A0}\uFE0F Input needed' : `\u{26A0}\uFE0F ${waitingCount} agents waiting`;
+      document.title = `${prefix} \u2014 ${baseTitle}`;
+    } else if (document.title !== baseTitle) {
+      document.title = baseTitle;
+    }
+  }
+
   /** Set or clear the focused agent for camera follow mode */
   setFocusAgent(agentId: string | null): void {
     this._focusedAgentId = agentId;
@@ -581,7 +628,7 @@ export class AgentManager {
     const agent = managed.state;
 
     // If displayName provided, use it. If undefined (reset), restore original.
-    const name = displayName || agent.agentName || agent.projectName || agent.id.slice(0, 8);
+    const name = displayName || agent.agentName || getFunnyName(agent.sessionId);
     managed.sprite.setCustomName(name);
 
     // If colorIndex provided, use it. If undefined (reset), restore original.

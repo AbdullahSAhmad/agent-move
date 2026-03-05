@@ -1,4 +1,7 @@
 import type { AgentState, ActivityEntry } from './agent.js';
+import type { AnomalyEvent } from './anomaly.js';
+import type { ToolChainData } from './tool-chain.js';
+import type { TaskGraphData } from './task-graph.js';
 
 /** Server → Client messages */
 export type ServerMessage =
@@ -8,7 +11,10 @@ export type ServerMessage =
   | AgentIdleMessage
   | AgentShutdownMessage
   | AgentHistoryMessage
-  | TimelineSnapshotMessage;
+  | TimelineSnapshotMessage
+  | AnomalyAlertMessage
+  | ToolChainSnapshotMessage
+  | TaskGraphSnapshotMessage;
 
 export interface FullStateMessage {
   type: 'full_state';
@@ -60,8 +66,26 @@ export interface TimelineSnapshotMessage {
   timestamp: number;
 }
 
+export interface AnomalyAlertMessage {
+  type: 'anomaly:alert';
+  anomaly: AnomalyEvent;
+  timestamp: number;
+}
+
+export interface ToolChainSnapshotMessage {
+  type: 'toolchain:snapshot';
+  data: ToolChainData;
+  timestamp: number;
+}
+
+export interface TaskGraphSnapshotMessage {
+  type: 'taskgraph:snapshot';
+  data: TaskGraphData;
+  timestamp: number;
+}
+
 /** Client → Server messages */
-export type ClientMessage = PingMessage | RequestHistoryMessage;
+export type ClientMessage = PingMessage | RequestHistoryMessage | RequestToolChainMessage | RequestTaskGraphMessage;
 
 export interface PingMessage {
   type: 'ping';
@@ -70,4 +94,12 @@ export interface PingMessage {
 export interface RequestHistoryMessage {
   type: 'request:history';
   agentId: string;
+}
+
+export interface RequestToolChainMessage {
+  type: 'request:toolchain';
+}
+
+export interface RequestTaskGraphMessage {
+  type: 'request:taskgraph';
 }

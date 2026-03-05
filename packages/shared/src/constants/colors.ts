@@ -73,6 +73,15 @@ export function getModelPricing(model: string | null): ModelPricing {
   return DEFAULT_PRICING;
 }
 
+/** Deterministic hash of project path to a palette index (agents from same project share color) */
+export function getProjectColorIndex(projectPath: string): number {
+  let hash = 0;
+  for (let i = 0; i < projectPath.length; i++) {
+    hash = ((hash << 5) - hash + projectPath.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash) % AGENT_PALETTES.length;
+}
+
 /** Compute cost for an agent's token usage (in dollars) */
 export function computeAgentCost(tokens: {
   totalInputTokens: number;

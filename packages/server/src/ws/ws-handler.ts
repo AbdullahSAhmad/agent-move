@@ -25,6 +25,18 @@ export function registerWsHandler(
             entries,
             timestamp: Date.now(),
           }));
+        } else if (msg.type === 'request:toolchain') {
+          broadcaster.sendToClient(socket, {
+            type: 'toolchain:snapshot',
+            data: stateManager.getToolChainSnapshot(),
+            timestamp: Date.now(),
+          });
+        } else if (msg.type === 'request:taskgraph') {
+          broadcaster.sendToClient(socket, {
+            type: 'taskgraph:snapshot',
+            data: stateManager.getTaskGraphSnapshot(),
+            timestamp: Date.now(),
+          });
         }
       } catch {
         // Ignore malformed messages

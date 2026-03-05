@@ -337,3 +337,8 @@ export const SUB_SPRITES: SpriteSet = {
   done: SUB_DONE,
   size: 12,
 };
+
+// ── Variant system ──────────────────────────────────────
+// 6 completely different body types × 12 color palettes = 72 unique looks.
+// Re-exported from separate file to keep this file manageable.
+export { MAIN_VARIANT_SETS, SUB_VARIANT_SETS, getVariantIndex } from './sprite-variants';

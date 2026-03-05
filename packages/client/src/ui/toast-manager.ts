@@ -1,4 +1,4 @@
-import type { AgentState } from '@agent-move/shared';
+import type { AgentState, AnomalyEvent } from '@agent-move/shared';
 import { AGENT_PALETTES } from '@agent-move/shared';
 import type { StateStore } from '../connection/state-store.js';
 import { hexToCss, escapeHtml } from '../utils/formatting.js';
@@ -34,6 +34,7 @@ export class ToastManager {
     this.store.on('agent:spawn', (agent) => this.onSpawn(agent));
     this.store.on('agent:idle', (agent) => this.onIdle(agent));
     this.store.on('agent:shutdown', (agentId) => this.onShutdown(agentId));
+    this.store.on('anomaly:alert', (anomaly) => this.onAnomaly(anomaly));
   }
 
   private getName(agent: AgentState): string {
@@ -65,7 +66,22 @@ export class ToastManager {
     this.show(`Agent shut down`, 'shutdown');
   }
 
-  show(html: string, type: 'spawn' | 'done' | 'shutdown' | 'info' = 'info'): void {
+  private static readonly ANOMALY_ICONS: Record<string, string> = {
+    'retry-loop': '\u{1F501}',
+    'token-spike': '\u{1F4C8}',
+    'stuck-agent': '\u{23F3}',
+  };
+
+  private onAnomaly(anomaly: AnomalyEvent): void {
+    const icon = ToastManager.ANOMALY_ICONS[anomaly.kind] ?? '\u26A0\uFE0F';
+    const type = anomaly.severity === 'critical' ? 'critical' : 'warning';
+    this.show(
+      `${icon} <strong>${escapeHtml(anomaly.agentName)}</strong>: ${escapeHtml(anomaly.message)}`,
+      type
+    );
+  }
+
+  show(html: string, type: 'spawn' | 'done' | 'shutdown' | 'info' | 'warning' | 'critical' = 'info'): void {
     const el = document.createElement('div');
     el.className = `toast toast-${type}`;
     el.innerHTML = html;

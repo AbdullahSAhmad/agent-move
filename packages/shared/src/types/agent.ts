@@ -29,6 +29,8 @@ export interface AgentState {
   isDone: boolean;
   /** Agent is in planning mode (between EnterPlanMode and ExitPlanMode) */
   isPlanning: boolean;
+  /** Agent is blocked waiting for user input (AskUserQuestion, permission confirmation) */
+  isWaitingForUser: boolean;
   totalInputTokens: number;
   totalOutputTokens: number;
   cacheReadTokens: number;

@@ -26,6 +26,9 @@ import { LeaderboardPanel } from './ui/leaderboard-panel.js';
 import { AgentCustomizer } from './ui/agent-customizer.js';
 
 import { ThemeManager } from './world/themes/theme-manager.js';
+import { ZoneAnnotations } from './ui/zone-annotations.js';
+import { ToolChainPanel } from './ui/tool-chain-panel.js';
+import { TaskGraphPanel } from './ui/task-graph-panel.js';
 
 async function main() {
   const appEl = document.getElementById('app')!;
@@ -96,6 +99,11 @@ async function main() {
 
   const analytics = new AnalyticsPanel(store, rightPanelContent);
   const leaderboard = new LeaderboardPanel(store, rightPanelContent);
+  const toolChainPanel = new ToolChainPanel(store, rightPanelContent);
+  const taskGraphPanel = new TaskGraphPanel(store, rightPanelContent);
+
+  // ── Zone Annotations ──
+  const zoneAnnotations = new ZoneAnnotations();
 
   // ── Toast Notifications ──
   const toasts = new ToastManager(store);
@@ -140,6 +148,14 @@ async function main() {
     e.preventDefault();
   });
 
+  // Double-click on canvas to add zone annotation
+  pixiApp.canvas.addEventListener('dblclick', (e) => {
+    const rect = pixiApp.canvas.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    zoneAnnotations.addAnnotationFromScreen(screenX, screenY);
+  });
+
   // ── Theme Manager ──
   const themeManager = new ThemeManager();
   world.applyTheme(themeManager.current);
@@ -178,6 +194,8 @@ async function main() {
     // Hide previous content
     if (currentTab === 'analytics') analytics.hide();
     if (currentTab === 'leaderboard') leaderboard.hide();
+    if (currentTab === 'toolchain') toolChainPanel.hide();
+    if (currentTab === 'taskgraph') taskGraphPanel.hide();
 
     currentTab = tab;
 
@@ -191,10 +209,19 @@ async function main() {
       if (detailPanel.isOpen()) detailPanel.close();
       overlayEl.style.display = 'none';
       rightPanelContent.style.display = '';
-      rightPanelTitle.textContent = tab === 'analytics' ? 'Analytics' : 'Leaderboard';
+
+      const titles: Record<string, string> = {
+        analytics: 'Analytics',
+        leaderboard: 'Leaderboard',
+        toolchain: 'Tool Chains',
+        taskgraph: 'Task Graph',
+      };
+      rightPanelTitle.textContent = titles[tab] ?? tab;
 
       if (tab === 'analytics') analytics.show();
-      else leaderboard.show();
+      else if (tab === 'leaderboard') leaderboard.show();
+      else if (tab === 'toolchain') toolChainPanel.show();
+      else if (tab === 'taskgraph') taskGraphPanel.show();
     }
   }
 
@@ -285,6 +312,23 @@ async function main() {
         break;
       case 'cycle-theme':
         themeManager.cycleNext();
+        break;
+      case 'toggle-annotations':
+        zoneAnnotations.toggle();
+        break;
+      case 'toggle-toolchain':
+        if (currentTab === 'toolchain') {
+          topBar.setActiveTab('monitor');
+        } else {
+          topBar.setActiveTab('toolchain');
+        }
+        break;
+      case 'toggle-taskgraph':
+        if (currentTab === 'taskgraph') {
+          topBar.setActiveTab('monitor');
+        } else {
+          topBar.setActiveTab('taskgraph');
+        }
         break;
     }
   });
@@ -397,6 +441,23 @@ async function main() {
       case 'p':
         themeManager.cycleNext();
         break;
+      case 'o':
+        zoneAnnotations.toggle();
+        break;
+      case 'c':
+        if (currentTab === 'toolchain') {
+          topBar.setActiveTab('monitor');
+        } else {
+          topBar.setActiveTab('toolchain');
+        }
+        break;
+      case 'g':
+        if (currentTab === 'taskgraph') {
+          topBar.setActiveTab('monitor');
+        } else {
+          topBar.setActiveTab('taskgraph');
+        }
+        break;
     }
   });
 
@@ -412,6 +473,7 @@ async function main() {
     }
 
     layoutEditor.updateTransform(root.x, root.y, root.scale.x);
+    zoneAnnotations.updateTransform(root.x, root.y, root.scale.x);
 
     if (focusModeActive) {
       const pos = agentManager.getFocusedAgentPosition();

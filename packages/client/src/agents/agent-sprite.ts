@@ -1,7 +1,7 @@
 import { Container, Graphics, Sprite, Text, TextStyle, Texture } from 'pixi.js';
 import type { AgentState, AgentPalette } from '@agent-move/shared';
-import { COLORS } from '@agent-move/shared';
-import { MAIN_SPRITES, SUB_SPRITES, type SpriteSet } from '../sprites/sprite-data.js';
+import { COLORS, getFunnyName } from '@agent-move/shared';
+import { MAIN_VARIANT_SETS, SUB_VARIANT_SETS, getVariantIndex, type SpriteSet } from '../sprites/sprite-data.js';
 import { createSpriteTexture, spriteKey } from '../sprites/sprite-factory.js';
 
 type AnimState = 'idle' | 'walk' | 'working' | 'sleeping' | 'done';
@@ -52,6 +52,7 @@ export class AgentSprite {
 
   private sprite: Sprite;
   private nameLabel: Text;
+  private projectLabel: Text;
 
   // Speech bubble components
   private speechBubble: Container;
@@ -79,6 +80,17 @@ export class AgentSprite {
   private planPulseTimer = 0;
   private _isPlanning = false;
 
+  // Waiting for user badge
+  private waitBadge: Container | null = null;
+  private waitBadgeBg: Graphics | null = null;
+  private waitBadgeText: Text | null = null;
+  private waitPulseTimer = 0;
+  private _isWaiting = false;
+  // Floating "?" letters for waiting state
+  private waitQContainer: Container;
+  private waitQLetters: Text[];
+  private waitQTimer = 0;
+
   private animState: AnimState = 'idle';
   private isIdleState = false;
   private isDoneState = false;
@@ -98,12 +110,21 @@ export class AgentSprite {
   // Done sparkles
   private sparkles: { gfx: Graphics; phase: number }[] = [];
 
+  // Anomaly badge
+  private anomalyBadge: Container | null = null;
+  private anomalyBadgeBg: Graphics | null = null;
+  private anomalyBadgeText: Text | null = null;
+  private anomalyPulseTimer = 0;
+  private _hasAnomaly = false;
+  private anomalyAutoClearTimer: ReturnType<typeof setTimeout> | null = null;
+
   // Activity ring
   private activityRing: Graphics;
   private activityLevel = 0; // 0..1, decays over time
   private activityPhase = 0; // rotation animation
 
   private isSubagent: boolean;
+  private variantIndex: number;
   private spriteHeight: number;
   private textures: {
     idle: [Texture, Texture];
@@ -139,8 +160,10 @@ export class AgentSprite {
   ) {
     this.isSubagent = agent.role === 'subagent';
     const isSubagent = this.isSubagent;
-    const spriteSet: SpriteSet = isSubagent ? SUB_SPRITES : MAIN_SPRITES;
-    const keyPrefix = isSubagent ? 'sub' : 'main';
+    this.variantIndex = getVariantIndex(agent.projectPath ?? agent.sessionId);
+    const vi = this.variantIndex;
+    const spriteSet: SpriteSet = isSubagent ? SUB_VARIANT_SETS[vi] : MAIN_VARIANT_SETS[vi];
+    const keyPrefix = isSubagent ? `sub_v${vi}` : `main_v${vi}`;
     const ci = agent.colorIndex;
 
     this.spriteHeight = spriteSet.size * 3;
@@ -169,7 +192,7 @@ export class AgentSprite {
     this.container.addChild(this.sprite);
 
     // Name label below sprite
-    const rawName = agent.agentName || agent.projectName || agent.id.slice(0, 8);
+    const rawName = agent.agentName || getFunnyName(agent.sessionId);
     const name = rawName.length > 14 ? rawName.slice(0, 12) + '..' : rawName;
     const labelStyle = new TextStyle({
       fontSize: 13,
@@ -188,6 +211,25 @@ export class AgentSprite {
     this.nameLabel.anchor.set(0.5, 0);
     this.nameLabel.position.set(0, this.spriteHeight / 2 + 6);
     this.container.addChild(this.nameLabel);
+
+    // Project label below name
+    const projectLabelStyle = new TextStyle({
+      fontSize: 7,
+      fontFamily: "'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
+      fill: COLORS.textDim,
+      align: 'center',
+      dropShadow: {
+        alpha: 0.6,
+        blur: 1,
+        color: 0x000000,
+        distance: 1,
+      },
+    });
+    this.projectLabel = new Text({ text: '', style: projectLabelStyle });
+    this.projectLabel.anchor.set(0.5, 0);
+    this.projectLabel.position.set(0, this.spriteHeight / 2 + 22);
+    this.projectLabel.visible = false;
+    this.container.addChild(this.projectLabel);
 
     // Speech bubble with background
     this.speechBubble = new Container();
@@ -241,6 +283,34 @@ export class AgentSprite {
     }
     this.zzzContainer.position.set(this.spriteHeight / 3, -this.spriteHeight / 2);
     this.container.addChild(this.zzzContainer);
+
+    // Floating "?" letters for waiting-for-user state
+    this.waitQContainer = new Container();
+    this.waitQContainer.visible = false;
+    this.waitQLetters = [];
+    const qSizes = [9, 11, 14];
+    for (let i = 0; i < 3; i++) {
+      const q = new Text({
+        text: '?',
+        style: new TextStyle({
+          fontSize: qSizes[i],
+          fontFamily: "'Segoe UI', sans-serif",
+          fill: 0xff9800,
+          fontWeight: '700',
+          dropShadow: {
+            alpha: 0.5,
+            blur: 2,
+            color: 0x000000,
+            distance: 1,
+          },
+        }),
+      });
+      q.anchor.set(0.5, 0.5);
+      this.waitQLetters.push(q);
+      this.waitQContainer.addChild(q);
+    }
+    this.waitQContainer.position.set(this.spriteHeight / 3, -this.spriteHeight / 2);
+    this.container.addChild(this.waitQContainer);
 
     // Activity ring (drawn behind sprite)
     this.activityRing = new Graphics();
@@ -355,10 +425,21 @@ export class AgentSprite {
 
   /** Update the displayed name label (e.g. when agentName is discovered after spawn) */
   updateName(agent: AgentState): void {
-    const rawName = agent.agentName || agent.projectName || agent.id.slice(0, 8);
+    const rawName = agent.agentName || getFunnyName(agent.sessionId);
     const name = rawName.length > 14 ? rawName.slice(0, 12) + '..' : rawName;
     if (this.nameLabel.text !== name) {
       this.nameLabel.text = name;
+    }
+  }
+
+  /** Set the project name label below the agent name */
+  setProjectName(name: string): void {
+    if (name) {
+      const display = name.length > 18 ? name.slice(0, 16) + '..' : name;
+      this.projectLabel.text = display;
+      this.projectLabel.visible = true;
+    } else {
+      this.projectLabel.visible = false;
     }
   }
 
@@ -370,9 +451,9 @@ export class AgentSprite {
 
   /** Rebuild all sprite textures with a new palette (for color customization) */
   rebuildTextures(palette: AgentPalette, colorIndex: number, renderer: any): void {
-    const spriteSet: SpriteSet = this.isSubagent ? SUB_SPRITES : MAIN_SPRITES;
-    const keyPrefix = this.isSubagent ? 'sub' : 'main';
-    // Use a custom prefix to avoid colliding with shared cache entries
+    const vi = this.variantIndex;
+    const spriteSet: SpriteSet = this.isSubagent ? SUB_VARIANT_SETS[vi] : MAIN_VARIANT_SETS[vi];
+    const keyPrefix = this.isSubagent ? `sub_v${vi}` : `main_v${vi}`;
     const ci = colorIndex;
 
     this.textures = {
@@ -549,9 +630,97 @@ export class AgentSprite {
       .stroke({ color: 0xfbbf24, width: 1, alpha: alpha * 0.7 });
   }
 
+  /** Show or hide waiting-for-user badge */
+  setWaiting(waiting: boolean): void {
+    this._isWaiting = waiting;
+
+    if (!waiting) {
+      if (this.waitBadge) this.waitBadge.visible = false;
+      this.waitQContainer.visible = false;
+      return;
+    }
+
+    if (!this.waitBadge) {
+      this.waitBadge = new Container();
+
+      this.waitBadgeBg = new Graphics();
+      this.waitBadge.addChild(this.waitBadgeBg);
+
+      this.waitBadgeText = new Text({
+        text: '?',
+        style: new TextStyle({
+          fontSize: 11,
+          fontFamily: "'Segoe UI', sans-serif",
+          fill: 0xffffff,
+          fontWeight: '700',
+        }),
+      });
+      this.waitBadgeText.anchor.set(0.5, 0.5);
+      this.waitBadge.addChild(this.waitBadgeText);
+
+      // Position above the sprite (center top)
+      this.waitBadge.position.set(0, -this.spriteHeight / 2 - 14);
+      this.container.addChild(this.waitBadge);
+    }
+
+    this.drawWaitBadge(1);
+    this.waitBadge.visible = true;
+  }
+
+  private drawWaitBadge(alpha: number): void {
+    if (!this.waitBadgeBg) return;
+    this.waitBadgeBg.clear();
+    this.waitBadgeBg
+      .circle(0, 0, 9)
+      .fill({ color: 0xff9800, alpha: alpha * 0.9 })
+      .stroke({ color: 0xffcc80, width: 1.5, alpha: alpha * 0.7 });
+  }
+
   /** Bump activity level (called on each tool use) */
   bumpActivity(): void {
     this.activityLevel = Math.min(1, this.activityLevel + 0.35);
+  }
+
+  /** Show pulsing anomaly badge (red/yellow circle with !) */
+  setAnomaly(_kind: string): void {
+    this._hasAnomaly = true;
+    this.anomalyPulseTimer = 0;
+
+    if (!this.anomalyBadge) {
+      this.anomalyBadge = new Container();
+      this.anomalyBadgeBg = new Graphics();
+      this.anomalyBadge.addChild(this.anomalyBadgeBg);
+
+      this.anomalyBadgeText = new Text({
+        text: '!',
+        style: new TextStyle({
+          fontSize: 10,
+          fontFamily: "'Segoe UI', sans-serif",
+          fill: 0xffffff,
+          fontWeight: '700',
+        }),
+      });
+      this.anomalyBadgeText.anchor.set(0.5, 0.5);
+      this.anomalyBadge.addChild(this.anomalyBadgeText);
+
+      this.anomalyBadge.position.set(this.spriteHeight / 2 + 2, -this.spriteHeight / 2 - 2);
+      this.container.addChild(this.anomalyBadge);
+    }
+
+    this.anomalyBadge.visible = true;
+
+    // Auto-clear after 30s
+    if (this.anomalyAutoClearTimer) clearTimeout(this.anomalyAutoClearTimer);
+    this.anomalyAutoClearTimer = setTimeout(() => this.clearAnomaly(), 30_000);
+  }
+
+  clearAnomaly(): void {
+    this._hasAnomaly = false;
+    if (this.anomalyBadge) this.anomalyBadge.visible = false;
+    if (this.anomalyAutoClearTimer) {
+      clearTimeout(this.anomalyAutoClearTimer);
+      this.anomalyAutoClearTimer = null;
+    }
   }
 
   /** Fade out and resolve when done */
@@ -661,6 +830,22 @@ export class AgentSprite {
       this.zzzContainer.visible = false;
     }
 
+    // Floating "?" animation for waiting-for-user
+    if (this._isWaiting) {
+      this.waitQContainer.visible = true;
+      this.waitQTimer += dt;
+      for (let i = 0; i < this.waitQLetters.length; i++) {
+        const offset = i / this.waitQLetters.length;
+        const t = ((this.waitQTimer / ZZZ_CYCLE + offset) % 1);
+        const q = this.waitQLetters[i];
+        q.position.set(t * ZZZ_DRIFT, -t * ZZZ_HEIGHT);
+        q.alpha = Math.max(0, 1 - t * 1.3);
+        q.scale.set(0.5 + t * 0.6);
+      }
+    } else {
+      this.waitQContainer.visible = false;
+    }
+
     // Sparkle animation for done
     if (this.isDoneState && this.sparkles.length > 0) {
       for (let i = 0; i < this.sparkles.length; i++) {
@@ -680,31 +865,51 @@ export class AgentSprite {
       }
     }
 
-    // Activity ring
-    this.activityLevel = Math.max(0, this.activityLevel - dt * 0.0004); // decay
-    if (this.activityLevel > 0.02 && !this.isDoneState) {
+    // Activity ring (orange when waiting for user, green otherwise)
+    if (this._isWaiting) {
+      // Persistent pulsing orange ring when waiting for user input
       this.activityRing.visible = true;
-      this.activityPhase += dt * 0.003;
+      this.activityPhase += dt * 0.004;
       this.activityRing.clear();
       const radius = this.spriteHeight / 2 + 6;
-      const alpha = this.activityLevel * 0.6;
-      // Draw rotating arc segments
-      const arcLen = Math.PI * 0.4 + this.activityLevel * Math.PI * 0.8;
+      const pulseAlpha = 0.4 + 0.3 * Math.sin(this.activityPhase * 2);
+      const arcLen = Math.PI * 1.2;
       for (let i = 0; i < 2; i++) {
         const start = this.activityPhase + i * Math.PI;
         this.activityRing.arc(0, 0, radius, start, start + arcLen)
-          .stroke({ color: 0x4ade80, width: 2, alpha });
+          .stroke({ color: 0xff9800, width: 2.5, alpha: pulseAlpha });
       }
-      // Outer glow
-      if (this.activityLevel > 0.3) {
-        for (let i = 0; i < 2; i++) {
-          const start = this.activityPhase + i * Math.PI;
-          this.activityRing.arc(0, 0, radius + 2, start, start + arcLen * 0.8)
-            .stroke({ color: 0x4ade80, width: 3, alpha: alpha * 0.25 });
-        }
+      for (let i = 0; i < 2; i++) {
+        const start = this.activityPhase + i * Math.PI;
+        this.activityRing.arc(0, 0, radius + 2, start, start + arcLen * 0.8)
+          .stroke({ color: 0xff9800, width: 3, alpha: pulseAlpha * 0.3 });
       }
     } else {
-      this.activityRing.visible = false;
+      this.activityLevel = Math.max(0, this.activityLevel - dt * 0.0004); // decay
+      if (this.activityLevel > 0.02 && !this.isDoneState) {
+        this.activityRing.visible = true;
+        this.activityPhase += dt * 0.003;
+        this.activityRing.clear();
+        const radius = this.spriteHeight / 2 + 6;
+        const alpha = this.activityLevel * 0.6;
+        // Draw rotating arc segments
+        const arcLen = Math.PI * 0.4 + this.activityLevel * Math.PI * 0.8;
+        for (let i = 0; i < 2; i++) {
+          const start = this.activityPhase + i * Math.PI;
+          this.activityRing.arc(0, 0, radius, start, start + arcLen)
+            .stroke({ color: 0x4ade80, width: 2, alpha });
+        }
+        // Outer glow
+        if (this.activityLevel > 0.3) {
+          for (let i = 0; i < 2; i++) {
+            const start = this.activityPhase + i * Math.PI;
+            this.activityRing.arc(0, 0, radius + 2, start, start + arcLen * 0.8)
+              .stroke({ color: 0x4ade80, width: 3, alpha: alpha * 0.25 });
+          }
+        }
+      } else {
+        this.activityRing.visible = false;
+      }
     }
 
     // Planning badge pulse
@@ -712,6 +917,29 @@ export class AgentSprite {
       this.planPulseTimer += dt * 0.003;
       const pulseAlpha = 0.7 + 0.3 * Math.sin(this.planPulseTimer);
       this.drawPlanBadge(pulseAlpha);
+    }
+
+    // Anomaly badge pulse
+    if (this._hasAnomaly && this.anomalyBadge?.visible && this.anomalyBadgeBg) {
+      this.anomalyPulseTimer += dt * 0.005;
+      const pulseScale = 0.85 + 0.15 * Math.sin(this.anomalyPulseTimer);
+      this.anomalyBadge.scale.set(pulseScale);
+      const r = 8;
+      this.anomalyBadgeBg.clear();
+      this.anomalyBadgeBg
+        .circle(0, 0, r)
+        .fill({ color: 0xef4444, alpha: 0.9 })
+        .stroke({ color: 0xfbbf24, width: 1.5, alpha: 0.7 });
+    }
+
+    // Waiting badge pulse (faster, more urgent)
+    if (this._isWaiting && this.waitBadge?.visible) {
+      this.waitPulseTimer += dt * 0.005;
+      const pulseAlpha = 0.5 + 0.5 * Math.sin(this.waitPulseTimer);
+      this.drawWaitBadge(pulseAlpha);
+      // Also pulse the badge scale for extra attention
+      const scale = 1 + 0.15 * Math.sin(this.waitPulseTimer * 0.7);
+      this.waitBadge.scale.set(scale);
     }
 
     // Speech bubble: rotation and timer
@@ -799,6 +1027,10 @@ export class AgentSprite {
   }
 
   destroy(): void {
+    if (this.anomalyAutoClearTimer) {
+      clearTimeout(this.anomalyAutoClearTimer);
+      this.anomalyAutoClearTimer = null;
+    }
     this.container.destroy({ children: true });
   }
 }

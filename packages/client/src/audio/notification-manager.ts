@@ -39,6 +39,10 @@ export class NotificationManager {
     this.show('Agent Idle', `${agentName} is now idle`);
   }
 
+  notifyInputNeeded(agentName: string): void {
+    this.show('\u{26A0}\uFE0F Input Needed', `${agentName} is waiting for your input!`);
+  }
+
   private show(title: string, body: string): void {
     if (!this._enabled) return;
     if (!this.permissionGranted) return;

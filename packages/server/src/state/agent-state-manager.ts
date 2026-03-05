@@ -1,10 +1,13 @@
 import { EventEmitter } from 'events';
-import type { AgentState, AgentEvent, ZoneId, ActivityEntry, TimelineEvent } from '@agent-move/shared';
-import { getZoneForTool } from '@agent-move/shared';
+import type { AgentState, AgentEvent, ZoneId, ActivityEntry, TimelineEvent, AnomalyEvent, ToolChainData, TaskGraphData } from '@agent-move/shared';
+import { getZoneForTool, getProjectColorIndex } from '@agent-move/shared';
 import { config } from '../config.js';
 import type { ParsedActivity } from '../watcher/jsonl-parser.js';
 import type { SessionInfo } from '../watcher/claude-paths.js';
 import { getGitBranch } from '../watcher/git-info.js';
+import { AnomalyDetector } from './anomaly-detector.js';
+import { ToolChainTracker } from './tool-chain-tracker.js';
+import { TaskGraphManager } from './task-graph-manager.js';
 
 const MAX_HISTORY_PER_AGENT = 500;
 const MAX_HISTORY_AGE_MS = 30 * 60 * 1000; // 30 minutes
@@ -38,6 +41,23 @@ export class AgentStateManager extends EventEmitter {
   /** Queued recipient names from SendMessage calls: rootSessionId → [{sender, recipient}] */
   private pendingRecipients = new Map<string, Array<{ sender: string; recipient: string }>>();
 
+  /** Anomaly detection for token spikes, retry loops, stuck agents */
+  public readonly anomalyDetector = new AnomalyDetector();
+  /** Tool chain transition tracking */
+  public readonly toolChainTracker = new ToolChainTracker();
+  /** Task dependency graph tracking */
+  public readonly taskGraphManager = new TaskGraphManager();
+
+  constructor() {
+    super();
+    // Start stuck-agent detection (checks every 30s)
+    this.anomalyDetector.startStuckDetection(() =>
+      Array.from(this.agents.values())
+        .filter(a => !this.hiddenAgents.has(a.id))
+        .map(a => ({ id: a.id, lastActivityAt: a.lastActivityAt, isIdle: a.isIdle }))
+    );
+  }
+
   getAll(): AgentState[] {
     // Exclude hidden agents from public state
     return Array.from(this.agents.values()).filter(a => !this.hiddenAgents.has(a.id));
@@ -68,6 +88,14 @@ export class AgentStateManager extends EventEmitter {
 
   getTimeline(): TimelineEvent[] {
     return this.timelineBuffer;
+  }
+
+  getToolChainSnapshot(): ToolChainData {
+    return this.toolChainTracker.getSnapshot();
+  }
+
+  getTaskGraphSnapshot(): TaskGraphData {
+    return this.taskGraphManager.getSnapshot();
   }
 
   /** Check if any named agents exist for a given root session */
@@ -123,6 +151,8 @@ export class AgentStateManager extends EventEmitter {
     'Agent',
     'WebFetch',
     'WebSearch',
+    // Tools that block waiting for user input
+    'AskUserQuestion',
     // Browser/playwright tools that wait for navigation or network
     'mcp__playwright__browser_navigate',
     'mcp__playwright__browser_wait_for',
@@ -132,6 +162,11 @@ export class AgentStateManager extends EventEmitter {
     'mcp__chrome-devtools__evaluate_script',
     'mcp__chrome-devtools__performance_start_trace',
     'mcp__chrome-devtools__performance_stop_trace',
+  ]);
+
+  /** Tools that block specifically waiting for user input/confirmation */
+  private static readonly USER_BLOCKING_TOOLS = new Set([
+    'AskUserQuestion',
   ]);
 
   private isLongRunningTool(toolName: string): boolean {
@@ -421,6 +456,7 @@ export class AgentStateManager extends EventEmitter {
         isIdle: false,
         isDone: false,
         isPlanning: false,
+        isWaitingForUser: false,
         totalInputTokens: 0,
         totalOutputTokens: 0,
         cacheReadTokens: 0,
@@ -515,11 +551,34 @@ export class AgentStateManager extends EventEmitter {
         } else {
           this.pendingTool.delete(agentId);
         }
+        // Track user-blocking state
+        agent.isWaitingForUser = AgentStateManager.USER_BLOCKING_TOOLS.has(toolName);
+
         const prevZone = agent.currentZone;
         agent.currentTool = activity.toolName ?? null;
         agent.currentActivity = this.summarizeToolInput(activity.toolInput) || null;
         agent.currentZone = getZoneForTool(activity.toolName ?? '');
         agent.toolUseCount++;
+
+        // Anomaly & analytics tracking
+        this.anomalyDetector.setAgentName(agentId, agent.agentName ?? agent.projectName ?? agentId.slice(0, 10));
+        this.anomalyDetector.checkToolUse(agentId, toolName);
+        this.toolChainTracker.recordToolUse(agentId, toolName);
+
+        // Task graph tracking
+        if (toolName === 'TaskCreate' || toolName === 'TaskUpdate') {
+          const graphChanged = this.taskGraphManager.processToolUse(
+            agentId,
+            agent.agentName ?? agentId.slice(0, 10),
+            toolName,
+            activity.toolInput,
+            agent.projectName,
+            agent.rootSessionId,
+          );
+          if (graphChanged) {
+            this.emit('taskgraph:changed', { data: this.taskGraphManager.getSnapshot(), timestamp: Date.now() });
+          }
+        }
 
         // Update git branch (getGitBranch has its own 30s cache)
         if (agent.projectPath) {
@@ -632,6 +691,7 @@ export class AgentStateManager extends EventEmitter {
       case 'text':
         // Text from assistant = Claude has responded, tool is no longer pending
         this.pendingTool.delete(agentId);
+        agent.isWaitingForUser = false;
         if (activity.text) {
           agent.speechText = activity.text;
           agent.currentActivity = activity.text;
@@ -649,10 +709,12 @@ export class AgentStateManager extends EventEmitter {
       case 'token_usage':
         // Token usage = message finished, tool is no longer pending
         this.pendingTool.delete(agentId);
+        agent.isWaitingForUser = false;
         agent.totalInputTokens += activity.inputTokens ?? 0;
         agent.totalOutputTokens += activity.outputTokens ?? 0;
         agent.cacheReadTokens += activity.cacheReadTokens ?? 0;
         agent.cacheCreationTokens += activity.cacheCreationTokens ?? 0;
+        this.anomalyDetector.checkTokenUsage(agentId, activity.inputTokens ?? 0, activity.outputTokens ?? 0);
         this.addHistory(agentId, {
           timestamp: now,
           kind: 'tokens',
@@ -783,6 +845,7 @@ export class AgentStateManager extends EventEmitter {
         }
         agent.isIdle = true;
         agent.isPlanning = false;
+        agent.isWaitingForUser = false;
         agent.currentZone = 'idle';
         agent.currentTool = null;
         agent.currentActivity = null;
@@ -851,6 +914,16 @@ export class AgentStateManager extends EventEmitter {
     this.addHistory(sessionId, { timestamp: ts, kind: 'shutdown' });
 
     const agent = this.agents.get(sessionId);
+
+    // Record timeline event before deleting — capture the full agent state
+    const shutdownEvent = {
+      type: 'agent:shutdown',
+      agent: agent ? { ...agent } : { id: sessionId } as AgentState,
+      timestamp: ts,
+    } satisfies AgentEvent;
+    this.recordTimeline(shutdownEvent);
+    this.emit('agent:shutdown', shutdownEvent);
+
     if (agent?.agentName) {
       const key = `${agent.rootSessionId}:${agent.agentName}`;
       if (this.namedAgentMap.get(key) === sessionId) {
@@ -866,14 +939,18 @@ export class AgentStateManager extends EventEmitter {
 
     this.agents.delete(sessionId);
     this.activityHistory.delete(sessionId);
+    this.anomalyDetector.removeAgent(sessionId);
+    this.toolChainTracker.resetAgent(sessionId);
+    // If no agents remain, fully clear tool chain data
+    if (!this.toolChainTracker.hasActiveAgents() && this.agents.size === 0) {
+      this.toolChainTracker.reset();
+    }
+    this.emit('toolchain:changed', { data: this.toolChainTracker.getSnapshot(), timestamp: Date.now() });
 
-    const shutdownEvent = {
-      type: 'agent:shutdown',
-      agent: { id: sessionId } as AgentState,
-      timestamp: ts,
-    } satisfies AgentEvent;
-    this.recordTimeline(shutdownEvent);
-    this.emit('agent:shutdown', shutdownEvent);
+    // Clean up tasks owned by this agent
+    if (this.taskGraphManager.removeAgentTasks(sessionId)) {
+      this.emit('taskgraph:changed', { data: this.taskGraphManager.getSnapshot(), timestamp: Date.now() });
+    }
 
     // Recursively shutdown all children
     for (const childId of childIds) {
@@ -882,5 +959,17 @@ export class AgentStateManager extends EventEmitter {
         this.shutdown(childId);
       }
     }
+  }
+
+  dispose(): void {
+    this.anomalyDetector.dispose();
+    this.clearAllTimers();
+  }
+
+  private clearAllTimers(): void {
+    for (const timer of this.idleTimers.values()) clearTimeout(timer);
+    this.idleTimers.clear();
+    for (const timer of this.identityTimers.values()) clearTimeout(timer);
+    this.identityTimers.clear();
   }
 }

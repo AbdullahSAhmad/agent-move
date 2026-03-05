@@ -1,9 +1,9 @@
 import type { AgentState, ZoneId } from '@agent-move/shared';
-import { AGENT_PALETTES, ZONE_MAP, ZONES } from '@agent-move/shared';
+import { AGENT_PALETTES, ZONE_MAP, ZONES, getFunnyName, getProjectColorIndex } from '@agent-move/shared';
 import type { StateStore, ConnectionStatus } from '../connection/state-store.js';
 import { escapeHtml, escapeAttr, truncate, formatTokenPair, hexToCss } from '../utils/formatting.js';
 
-type FilterMode = 'all' | 'active' | 'idle' | 'done' | ZoneId;
+type FilterMode = 'all' | 'active' | 'idle' | 'done' | ZoneId | `project:${string}`;
 
 interface TokenHistory {
   samples: number[];
@@ -95,7 +95,14 @@ export class Overlay {
       { label: 'Done', value: 'done' },
     ];
 
-    const doneCount = Array.from(this.store.getAgents().values()).filter(a => a.isDone).length;
+    const allAgents = Array.from(this.store.getAgents().values());
+    const doneCount = allAgents.filter(a => a.isDone).length;
+
+    // Collect unique project names for project filter
+    const projectNames = [...new Set(allAgents.map(a => a.projectName).filter(Boolean))] as string[];
+    const showProjectFilter = projectNames.length > 1;
+    const currentProjectFilter = typeof this.currentFilter === 'string' && this.currentFilter.startsWith('project:')
+      ? this.currentFilter.slice('project:'.length) : '';
 
     this.filterEl.innerHTML = filters.map(f => {
       const badge = f.value === 'done' && doneCount > 0 ? ` <span class="filter-badge">${doneCount}</span>` : '';
@@ -105,6 +112,10 @@ export class Overlay {
         <option value="">Zone...</option>
         ${ZONES.map(z => `<option value="${z.id}" ${this.currentFilter === z.id ? 'selected' : ''}>${z.icon} ${z.label}</option>`).join('')}
       </select>
+      ${showProjectFilter ? `<select class="filter-zone-select filter-project-select" title="Filter by project">
+        <option value="">Project...</option>
+        ${projectNames.sort().map(p => `<option value="project:${escapeAttr(p)}" ${currentProjectFilter === p ? 'selected' : ''}>${escapeHtml(p)}</option>`).join('')}
+      </select>` : ''}
       ${doneCount > 0 ? `<button class="clean-done-btn" title="Remove ${doneCount} done agent${doneCount > 1 ? 's' : ''}">Clean up (${doneCount})</button>` : ''}
     `;
 
@@ -112,21 +123,39 @@ export class Overlay {
       btn.addEventListener('click', () => {
         this.currentFilter = (btn as HTMLElement).dataset.filter as FilterMode;
         (this.filterEl.querySelector('.filter-zone-select') as HTMLSelectElement).value = '';
+        const projSelect = this.filterEl.querySelector('.filter-project-select') as HTMLSelectElement | null;
+        if (projSelect) projSelect.value = '';
         this.renderFilters();
         this.renderAgents();
       });
     });
 
-    const zoneSelect = this.filterEl.querySelector('.filter-zone-select') as HTMLSelectElement;
+    const zoneSelect = this.filterEl.querySelector('.filter-zone-select:not(.filter-project-select)') as HTMLSelectElement;
     zoneSelect.addEventListener('change', () => {
       if (zoneSelect.value) {
         this.currentFilter = zoneSelect.value as ZoneId;
       } else {
         this.currentFilter = 'all';
       }
+      const projSelect = this.filterEl.querySelector('.filter-project-select') as HTMLSelectElement | null;
+      if (projSelect) projSelect.value = '';
       this.renderFilters();
       this.renderAgents();
     });
+
+    const projectSelect = this.filterEl.querySelector('.filter-project-select') as HTMLSelectElement | null;
+    if (projectSelect) {
+      projectSelect.addEventListener('change', () => {
+        if (projectSelect.value) {
+          this.currentFilter = projectSelect.value as FilterMode;
+        } else {
+          this.currentFilter = 'all';
+        }
+        zoneSelect.value = '';
+        this.renderFilters();
+        this.renderAgents();
+      });
+    }
 
     const cleanBtn = this.filterEl.querySelector('.clean-done-btn');
     if (cleanBtn) {
@@ -158,7 +187,12 @@ export class Overlay {
   }
 
   private filterAgents(agents: AgentState[]): AgentState[] {
-    switch (this.currentFilter) {
+    const f = this.currentFilter;
+    if (typeof f === 'string' && f.startsWith('project:')) {
+      const projectName = f.slice('project:'.length);
+      return agents.filter(a => a.projectName === projectName);
+    }
+    switch (f) {
       case 'all':
         return agents;
       case 'active':
@@ -168,7 +202,7 @@ export class Overlay {
       case 'done':
         return agents.filter(a => a.isDone);
       default:
-        return agents.filter(a => a.currentZone === this.currentFilter);
+        return agents.filter(a => a.currentZone === f);
     }
   }
 
@@ -382,11 +416,21 @@ export class Overlay {
     const zoneName = zone ? zone.label : agent.currentZone;
     const toolText = agent.currentTool ?? 'none';
     const tokens = formatTokenPair(agent.totalInputTokens, agent.totalOutputTokens);
-    const name = custom?.displayName || agent.agentName || agent.projectName || this.shortenId(agent.sessionId);
+    const name = custom?.displayName || agent.agentName || getFunnyName(agent.sessionId);
     const childClass = isChild ? ' agent-card-child' : '';
     const doneClass = agent.isDone ? ' agent-card-done' : '';
     const doneBadge = agent.isDone ? '<span class="status-badge done">DONE</span>' : '';
     const subBadge = subCount > 0 ? `<span class="sub-count" title="${subCount} subagent${subCount > 1 ? 's' : ''}">${subCount} sub${subCount > 1 ? 's' : ''}</span>` : '';
+    const projColorIdx = agent.projectPath ? getProjectColorIndex(agent.projectPath) : colorIndex;
+    const projColor = hexToCss(AGENT_PALETTES[projColorIdx % AGENT_PALETTES.length].body);
+    const projectBadge = agent.projectName ? `<span style="
+      background: ${projColor}33;
+      color: ${projColor};
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 9px;
+      margin-left: 4px;
+    ">${escapeHtml(agent.projectName)}</span>` : '';
 
     // Status dot instead of opacity
     const statusClass = agent.isDone ? 'done' : agent.isIdle ? 'idle' : 'active';
@@ -395,7 +439,7 @@ export class Overlay {
       <div class="card-top-row">
         <div class="name">
           <span class="agent-status-dot ${statusClass}"></span>
-          ${isChild ? '<span class="child-connector">&#8627;</span>' : ''}${escapeHtml(name)}${this.roleBadge(agent.role)}${doneBadge}${subBadge}
+          ${isChild ? '<span class="child-connector">&#8627;</span>' : ''}${escapeHtml(name)}${this.roleBadge(agent.role)}${projectBadge}${doneBadge}${subBadge}
         </div>
         <div class="card-actions">
           <canvas class="sparkline-canvas" data-agent-id="${agent.id}" width="60" height="20"></canvas>

@@ -1,6 +1,6 @@
 import type { WebSocket } from 'ws';
 import type { AgentStateManager } from '../state/agent-state-manager.js';
-import type { ServerMessage, AgentEvent } from '@agent-move/shared';
+import type { ServerMessage, AgentEvent, AnomalyEvent, TaskGraphData, ToolChainData } from '@agent-move/shared';
 
 export class Broadcaster {
   private clients = new Set<WebSocket>();
@@ -24,6 +24,33 @@ export class Broadcaster {
         }
       });
     }
+
+    // Forward anomaly events
+    stateManager.anomalyDetector.on('anomaly', (anomaly: AnomalyEvent) => {
+      this.broadcast({
+        type: 'anomaly:alert',
+        anomaly,
+        timestamp: Date.now(),
+      });
+    });
+
+    // Forward tool chain changes
+    stateManager.on('toolchain:changed', (payload: { data: ToolChainData; timestamp: number }) => {
+      this.broadcast({
+        type: 'toolchain:snapshot',
+        data: payload.data,
+        timestamp: payload.timestamp,
+      });
+    });
+
+    // Forward task graph changes
+    stateManager.on('taskgraph:changed', (payload: { data: TaskGraphData; timestamp: number }) => {
+      this.broadcast({
+        type: 'taskgraph:snapshot',
+        data: payload.data,
+        timestamp: payload.timestamp,
+      });
+    });
   }
 
   addClient(ws: WebSocket) {
@@ -53,9 +80,32 @@ export class Broadcaster {
           timestamp: Date.now(),
         };
         ws.send(JSON.stringify(timeline));
+
+        // Send tool chain snapshot
+        const toolchain: ServerMessage = {
+          type: 'toolchain:snapshot',
+          data: this.stateManager.getToolChainSnapshot(),
+          timestamp: Date.now(),
+        };
+        ws.send(JSON.stringify(toolchain));
+
+        // Send task graph snapshot
+        const taskgraph: ServerMessage = {
+          type: 'taskgraph:snapshot',
+          data: this.stateManager.getTaskGraphSnapshot(),
+          timestamp: Date.now(),
+        };
+        ws.send(JSON.stringify(taskgraph));
       } catch {
         this.clients.delete(ws);
       }
+    }
+  }
+
+  /** Send a message to a specific client */
+  sendToClient(ws: WebSocket, message: ServerMessage): void {
+    if (ws.readyState === 1) {
+      try { ws.send(JSON.stringify(message)); } catch { this.clients.delete(ws); }
     }
   }
 

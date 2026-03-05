@@ -1,5 +1,5 @@
 import type { AgentState } from '@agent-move/shared';
-import { AGENT_PALETTES } from '@agent-move/shared';
+import { AGENT_PALETTES, getFunnyName } from '@agent-move/shared';
 import { storageGet, storageSet } from '../utils/storage.js';
 
 export interface CustomizationData {
@@ -69,7 +69,7 @@ export class AgentCustomizer {
 
   /** Get the default display name for an agent (before customization) */
   private getDefaultName(agent: AgentState): string {
-    return agent.agentName || agent.projectName || agent.id.slice(0, 8);
+    return agent.agentName || getFunnyName(agent.sessionId);
   }
 
   /** Get display name for an agent, respecting customizations keyed by sessionId */
