@@ -31,6 +31,8 @@ export class WorldManager {
   private _worldHeight = 980;
   private gridGraphics: import('pixi.js').Graphics;
   private resizeHandler: () => void;
+  private resizeRaf = 0;
+  private resizeObserver: ResizeObserver | null = null;
 
   constructor(app: Application) {
     this.app = app;
@@ -75,9 +77,28 @@ export class WorldManager {
     // Auto-fit to viewport
     this.camera.resetView(worldWidth, worldHeight);
 
-    // Listen for resize
-    this.resizeHandler = () => this.onResize();
+    // Listen for resize — defer to next frame so Pixi's resizeTo has updated app.screen
+    this.resizeHandler = () => {
+      cancelAnimationFrame(this.resizeRaf);
+      this.resizeRaf = requestAnimationFrame(() => this.onResize());
+    };
     window.addEventListener('resize', this.resizeHandler);
+
+    // Also observe container resizes (e.g. sidebar collapse/expand)
+    const container = document.getElementById('canvas-container');
+    if (container) {
+      let resizeTimeout = 0;
+      this.resizeObserver = new ResizeObserver(() => {
+        // Debounce to catch final size after CSS transitions
+        clearTimeout(resizeTimeout);
+        resizeTimeout = window.setTimeout(() => {
+          // Force Pixi to resize its canvas to match the container
+          app.resize();
+          this.onResize();
+        }, 250);
+      });
+      this.resizeObserver.observe(container);
+    }
   }
 
   private onResize(): void {
@@ -85,26 +106,26 @@ export class WorldManager {
     const screenH = this.app.screen.height;
     const { worldWidth, worldHeight } = this.layoutEngine.computeLayout(screenW, screenH);
 
-    if (worldWidth === this._worldWidth && worldHeight === this._worldHeight) return;
+    if (worldWidth !== this._worldWidth || worldHeight !== this._worldHeight) {
+      this._worldWidth = worldWidth;
+      this._worldHeight = worldHeight;
 
-    this._worldWidth = worldWidth;
-    this._worldHeight = worldHeight;
+      // Rebuild grid background
+      this.gridLayer.removeChildren();
+      this.gridGraphics.destroy();
+      this.gridGraphics = createGrid(worldWidth, worldHeight);
+      this.gridLayer.addChild(this.gridGraphics);
 
-    // Rebuild grid background
-    this.gridLayer.removeChildren();
-    this.gridGraphics.destroy();
-    this.gridGraphics = createGrid(worldWidth, worldHeight);
-    this.gridLayer.addChild(this.gridGraphics);
+      // Rebuild zone visuals from mutated ZONES array
+      this.zoneRenderer.rebuild();
 
-    // Rebuild zone visuals from mutated ZONES array
-    this.zoneRenderer.rebuild();
+      // Resize day/night overlay
+      this.dayNight.overlay.clear();
+      this.dayNight.overlay.rect(0, 0, worldWidth, worldHeight).fill({ color: 0x1a1a4a, alpha: 1 });
+    }
 
-    // Resize day/night overlay
-    this.dayNight.overlay.clear();
-    this.dayNight.overlay.rect(0, 0, worldWidth, worldHeight).fill({ color: 0x1a1a4a, alpha: 1 });
-
-    // Re-fit camera
-    this.camera.resetView(worldWidth, worldHeight);
+    // Always re-fit camera to new viewport size
+    this.camera.resetView(this._worldWidth, this._worldHeight);
   }
 
   /** Reset camera to fit all rooms */
@@ -179,5 +200,6 @@ export class WorldManager {
 
   destroy(): void {
     window.removeEventListener('resize', this.resizeHandler);
+    this.resizeObserver?.disconnect();
   }
 }

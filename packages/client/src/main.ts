@@ -11,7 +11,7 @@ import { NotificationManager } from './audio/notification-manager.js';
 import { ZoneHeatmap } from './ui/zone-heatmap.js';
 import { CommandPalette } from './ui/command-palette.js';
 import { AnalyticsPanel } from './ui/analytics-panel.js';
-import { LayoutEditor, applySavedLayout } from './ui/layout-editor.js';
+import { applySavedLayout } from './ui/layout-editor.js';
 import { TopBar } from './ui/top-bar.js';
 import type { NavTab } from './ui/top-bar.js';
 import { Sidebar } from './ui/sidebar.js';
@@ -52,8 +52,8 @@ async function main() {
   // Init world (zones, grid, camera)
   const world = new WorldManager(pixiApp);
 
-  // Init layout editor
-  const layoutEditor = new LayoutEditor(world);
+  // Layout editor hidden for now (needs more work)
+  // const layoutEditor = new LayoutEditor(world);
 
   // Init agent manager
   const agentManager = new AgentManager(pixiApp, world, store);
@@ -107,11 +107,12 @@ async function main() {
   });
   agentManager.setHoverHandler((agentId, x, y) => {
     if (agentId) {
-      // Convert world coords to screen coords
+      // Convert world coords to screen coords, accounting for canvas position on page
       const root = world.root;
-      const screenX = x * root.scale.x + root.x;
-      const screenY = y * root.scale.y + root.y;
-      hoverBar.show(agentId, screenX, screenY);
+      const canvasX = x * root.scale.x + root.x;
+      const canvasY = y * root.scale.y + root.y;
+      const rect = pixiApp.canvas.getBoundingClientRect();
+      hoverBar.show(agentId, canvasX + rect.left, canvasY + rect.top);
     } else {
       hoverBar.hide();
     }
@@ -187,6 +188,11 @@ async function main() {
   waterfallPanel.setCustomizationLookup(custLookup);
   relationshipGraph.setCustomizationLookup(custLookup);
   activityFeed.setCustomizationLookup(custLookup);
+  toasts.setCustomizationLookup(custLookup);
+  notificationPanel.setCustomizationLookup(custLookup);
+  timeline.setCustomizationLookup(custLookup);
+  sessionExport.setCustomizationLookup(custLookup);
+
   customizer.setChangeHandler((agentId, data) => {
     agentManager.applyCustomization(agentId, data.displayName, data.colorIndex);
     if (detailPanel.currentAgentId === agentId) {
@@ -618,7 +624,7 @@ async function main() {
       heatmap.updateTransform(root.x, root.y, root.scale.x);
     }
 
-    layoutEditor.updateTransform(root.x, root.y, root.scale.x);
+    // layoutEditor.updateTransform(root.x, root.y, root.scale.x);
     zoneAnnotations.updateTransform(root.x, root.y, root.scale.x);
 
     if (focusModeActive) {
