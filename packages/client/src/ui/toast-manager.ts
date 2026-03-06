@@ -19,7 +19,13 @@ const MAX_TOASTS = 5;
 export class ToastManager {
   private containerEl: HTMLElement;
   private store: StateStore;
+  private _customizationLookup: ((agent: AgentState) => { displayName: string; colorIndex: number }) | null = null;
   private toasts: ToastEntry[] = [];
+  private onSpawnBound: (agent: AgentState) => void;
+  private onIdleBound: (agent: AgentState) => void;
+  private onShutdownBound: (agentId: string) => void;
+  private onAnomalyBound: (anomaly: AnomalyEvent) => void;
+  private onTaskBound: (data: { taskSubject: string }) => void;
 
   constructor(store: StateStore) {
     this.store = store;
@@ -31,14 +37,25 @@ export class ToastManager {
     document.body.appendChild(this.containerEl);
 
     // Listen for events
-    this.store.on('agent:spawn', (agent) => this.onSpawn(agent));
-    this.store.on('agent:idle', (agent) => this.onIdle(agent));
-    this.store.on('agent:shutdown', (agentId) => this.onShutdown(agentId));
-    this.store.on('anomaly:alert', (anomaly) => this.onAnomaly(anomaly));
+    this.onSpawnBound = (agent) => this.onSpawn(agent);
+    this.onIdleBound = (agent) => this.onIdle(agent);
+    this.onShutdownBound = (agentId) => this.onShutdown(agentId);
+    this.onAnomalyBound = (anomaly) => this.onAnomaly(anomaly);
+    this.onTaskBound = ({ taskSubject }) => this.onTaskCompleted(taskSubject);
+    this.store.on('agent:spawn', this.onSpawnBound);
+    this.store.on('agent:idle', this.onIdleBound);
+    this.store.on('agent:shutdown', this.onShutdownBound);
+    this.store.on('anomaly:alert', this.onAnomalyBound);
+    this.store.on('task:completed', this.onTaskBound);
+  }
+
+  setCustomizationLookup(fn: (agent: AgentState) => { displayName: string; colorIndex: number }): void {
+    this._customizationLookup = fn;
   }
 
   private getName(agent: AgentState): string {
-    return agent.agentName || agent.projectName || agent.sessionId.slice(0, 10);
+    const custom = this._customizationLookup?.(agent);
+    return custom?.displayName || agent.agentName || agent.projectName || agent.sessionId.slice(0, 10);
   }
 
   private getColor(agent: AgentState): string {
@@ -62,8 +79,13 @@ export class ToastManager {
   }
 
   private onShutdown(agentId: string): void {
-    // Agent already removed from store at this point — use minimal info
-    this.show(`Agent shut down`, 'shutdown');
+    const agent = this.store.getAgent(agentId);
+    const name = agent ? this.getName(agent) : agentId.slice(0, 10);
+    this.show(`<strong>${escapeHtml(name)}</strong> shut down`, 'shutdown');
+  }
+
+  private onTaskCompleted(taskSubject: string): void {
+    this.show(`\u2713 Task completed: <strong>${escapeHtml(taskSubject)}</strong>`, 'done');
   }
 
   private static readonly ANOMALY_ICONS: Record<string, string> = {
@@ -125,6 +147,11 @@ export class ToastManager {
   }
 
   dispose(): void {
+    this.store.off('agent:spawn', this.onSpawnBound);
+    this.store.off('agent:idle', this.onIdleBound);
+    this.store.off('agent:shutdown', this.onShutdownBound);
+    this.store.off('anomaly:alert', this.onAnomalyBound);
+    this.store.off('task:completed', this.onTaskBound);
     for (const t of this.toasts) {
       clearTimeout(t.timer);
       t.el.remove();

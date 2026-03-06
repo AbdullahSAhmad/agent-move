@@ -44,7 +44,7 @@ export class ToolChainPanel {
       return;
     }
 
-    const { transitions, toolCounts } = this.data;
+    const { transitions, toolCounts, toolSuccesses, toolFailures, toolAvgDuration } = this.data;
     const maxCount = Math.max(...transitions.map(t => t.count));
 
     // Sort tools by actual call count
@@ -58,18 +58,48 @@ export class ToolChainPanel {
       : transitions;
     const filteredMax = Math.max(...filtered.map(t => t.count), 1);
 
+    const hasOutcomes = Object.keys(toolSuccesses ?? {}).length > 0 || Object.keys(toolFailures ?? {}).length > 0;
+
     let html = '';
 
     // ── Tool frequency summary ──
     html += `<div class="tc-section"><div class="tc-section-title">Tool Usage <span class="tc-hint">(${totalCalls} total calls)</span></div>`;
+    if (hasOutcomes) {
+      html += `<div class="tc-col-header"><span class="tc-col-name">Tool</span><span class="tc-col-mid"></span><span class="tc-col-count">Calls</span><span class="tc-col-status">Status</span><span class="tc-col-avg">Avg</span></div>`;
+    }
     html += '<div class="tc-tools">';
     for (const [tool, count] of sortedTools) {
       const pct = (count / maxFreq) * 100;
       const isSelected = tool === this.selectedTool;
+      const successes = toolSuccesses?.[tool] ?? 0;
+      const failures = toolFailures?.[tool] ?? 0;
+      const outcomes = successes + failures;
+      const failRate = outcomes > 0 ? failures / outcomes : 0;
+      const avgMs = toolAvgDuration?.[tool];
+
       html += `<div class="tc-tool-row ${isSelected ? 'tc-selected' : ''}" data-tool="${this.esc(tool)}">`;
       html += `<span class="tc-tool-name">${this.esc(this.shortName(tool))}</span>`;
-      html += `<div class="tc-tool-bar-wrap"><div class="tc-tool-bar" style="width:${pct}%"></div></div>`;
+      html += `<div class="tc-tool-bar-wrap">`;
+      html += `<div class="tc-tool-bar" style="width:${pct}%"></div>`;
+      // Failure overlay bar
+      if (failures > 0) {
+        const failPct = (failures / count) * pct;
+        html += `<div class="tc-tool-bar tc-fail-bar" style="width:${failPct}%"></div>`;
+      }
+      html += `</div>`;
       html += `<span class="tc-tool-count">${count}</span>`;
+      // Outcome badge — always render slot for consistent width
+      if (hasOutcomes && outcomes > 0 && failRate > 0) {
+        html += `<span class="tc-outcome tc-outcome-fail" title="${failures} failed">${Math.round(failRate * 100)}%</span>`;
+      } else if (hasOutcomes && outcomes > 0) {
+        html += `<span class="tc-outcome tc-outcome-ok" title="${successes} succeeded">\u2713</span>`;
+      } else if (hasOutcomes) {
+        html += `<span class="tc-outcome"></span>`;
+      }
+      // Avg duration — always render slot for consistent width
+      if (hasOutcomes) {
+        html += `<span class="tc-duration" title="avg per call">${avgMs !== undefined ? this.fmtMs(avgMs) : '\u2014'}</span>`;
+      }
       html += `</div>`;
     }
     html += '</div></div>';
@@ -123,6 +153,12 @@ export class ToolChainPanel {
         this.render();
       });
     }
+  }
+
+  private fmtMs(ms: number): string {
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+    return `${Math.round(ms / 60000)}m`;
   }
 
   private shortName(name: string): string {

@@ -51,8 +51,8 @@ export class AgentSprite {
   public readonly container = new Container();
 
   private sprite: Sprite;
+  private nameBg: Graphics;
   private nameLabel: Text;
-  private projectLabel: Text;
 
   // Speech bubble components
   private speechBubble: Container;
@@ -109,6 +109,17 @@ export class AgentSprite {
 
   // Done sparkles
   private sparkles: { gfx: Graphics; phase: number }[] = [];
+
+  // Compacting badge (context compaction in progress)
+  private compactBadge: Container | null = null;
+  private compactBadgeBg: Graphics | null = null;
+  private compactBadgeText: Text | null = null;
+  private compactPulseTimer = 0;
+  private _isCompacting = false;
+
+  // Tool outcome flash (success = green, failure = red)
+  private outcomeFlash: { outcome: 'success' | 'failure'; timer: number } | null = null;
+  private static OUTCOME_FLASH_DURATION = 700;
 
   // Anomaly badge
   private anomalyBadge: Container | null = null;
@@ -191,45 +202,27 @@ export class AgentSprite {
     this.sprite.anchor.set(0.5, 0.5);
     this.container.addChild(this.sprite);
 
+    // Dark background pill behind name label
+    this.nameBg = new Graphics();
+    this.container.addChild(this.nameBg);
+
     // Name label below sprite
     const rawName = agent.agentName || getFunnyName(agent.sessionId);
     const name = rawName.length > 14 ? rawName.slice(0, 12) + '..' : rawName;
     const labelStyle = new TextStyle({
-      fontSize: 13,
+      fontSize: 11,
       fontFamily: "'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
-      fill: COLORS.text,
+      fill: 0xffffff,
       align: 'center',
-      fontWeight: '600',
-      dropShadow: {
-        alpha: 0.8,
-        blur: 2,
-        color: 0x000000,
-        distance: 1,
-      },
+      fontWeight: '700',
     });
     this.nameLabel = new Text({ text: name, style: labelStyle });
     this.nameLabel.anchor.set(0.5, 0);
-    this.nameLabel.position.set(0, this.spriteHeight / 2 + 6);
+    this.nameLabel.position.set(0, this.spriteHeight / 2 + 8);
     this.container.addChild(this.nameLabel);
 
-    // Project label below name
-    const projectLabelStyle = new TextStyle({
-      fontSize: 7,
-      fontFamily: "'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
-      fill: COLORS.textDim,
-      align: 'center',
-      dropShadow: {
-        alpha: 0.6,
-        blur: 1,
-        color: 0x000000,
-        distance: 1,
-      },
-    });
-    this.projectLabel = new Text({ text: '', style: projectLabelStyle });
-    this.projectLabel.anchor.set(0.5, 0);
-    this.projectLabel.position.set(0, this.spriteHeight / 2 + 22);
-    this.projectLabel.visible = false;
-    this.container.addChild(this.projectLabel);
+    // Draw initial name background
+    this.updateNameBg();
 
     // Speech bubble with background
     this.speechBubble = new Container();
@@ -429,24 +422,35 @@ export class AgentSprite {
     const name = rawName.length > 14 ? rawName.slice(0, 12) + '..' : rawName;
     if (this.nameLabel.text !== name) {
       this.nameLabel.text = name;
+      this.updateNameBg();
     }
   }
 
-  /** Set the project name label below the agent name */
-  setProjectName(name: string): void {
-    if (name) {
-      const display = name.length > 18 ? name.slice(0, 16) + '..' : name;
-      this.projectLabel.text = display;
-      this.projectLabel.visible = true;
-    } else {
-      this.projectLabel.visible = false;
-    }
+  /** @deprecated Project label removed — sprite variant conveys project identity */
+  setProjectName(_name: string): void {
+    // no-op
   }
 
   /** Override the displayed name with a custom one */
   setCustomName(name: string): void {
     const display = name.length > 14 ? name.slice(0, 12) + '..' : name;
     this.nameLabel.text = display;
+    this.updateNameBg();
+  }
+
+  /** Redraw the dark pill behind the name + project labels */
+  private updateNameBg(): void {
+    this.nameBg.clear();
+    const padX = 6;
+    const padY = 3;
+    const nameW = this.nameLabel.width;
+    const nameH = this.nameLabel.height;
+    const w = nameW + padX * 2;
+    const h = nameH + padY * 2;
+    const bgY = this.spriteHeight / 2 + 8 - padY;
+    this.nameBg
+      .roundRect(-w / 2, bgY, w, h, 4)
+      .fill({ color: 0x000000, alpha: 0.55 });
   }
 
   /** Rebuild all sprite textures with a new palette (for color customization) */
@@ -676,6 +680,59 @@ export class AgentSprite {
       .stroke({ color: 0xffcc80, width: 1.5, alpha: alpha * 0.7 });
   }
 
+  /** Show or hide context-compaction badge */
+  setCompacting(compacting: boolean): void {
+    this._isCompacting = compacting;
+
+    if (!compacting) {
+      if (this.compactBadge) this.compactBadge.visible = false;
+      return;
+    }
+
+    if (!this.compactBadge) {
+      this.compactBadge = new Container();
+
+      this.compactBadgeBg = new Graphics();
+      this.compactBadge.addChild(this.compactBadgeBg);
+
+      this.compactBadgeText = new Text({
+        text: '\u21BA COMPACT',
+        style: new TextStyle({
+          fontSize: 8,
+          fontFamily: "'Segoe UI', sans-serif",
+          fill: 0xffffff,
+          fontWeight: '700',
+          letterSpacing: 0.3,
+        }),
+      });
+      this.compactBadgeText.anchor.set(0.5, 0.5);
+      this.compactBadge.addChild(this.compactBadgeText);
+
+      // Position below the name label
+      this.compactBadge.position.set(0, this.spriteHeight / 2 + 28);
+      this.container.addChild(this.compactBadge);
+    }
+
+    this.drawCompactBadge(1);
+    this.compactBadge.visible = true;
+  }
+
+  private drawCompactBadge(alpha: number): void {
+    if (!this.compactBadgeBg) return;
+    const w = 58;
+    const h = 13;
+    this.compactBadgeBg.clear();
+    this.compactBadgeBg
+      .roundRect(-w / 2, -h / 2, w, h, 3)
+      .fill({ color: 0x7c3aed, alpha: alpha * 0.9 })
+      .stroke({ color: 0xa78bfa, width: 1, alpha: alpha * 0.7 });
+  }
+
+  /** Flash a brief success (green) or failure (red) ring around the agent */
+  flashOutcome(outcome: 'success' | 'failure'): void {
+    this.outcomeFlash = { outcome, timer: AgentSprite.OUTCOME_FLASH_DURATION };
+  }
+
   /** Bump activity level (called on each tool use) */
   bumpActivity(): void {
     this.activityLevel = Math.min(1, this.activityLevel + 0.35);
@@ -865,6 +922,10 @@ export class AgentSprite {
       }
     }
 
+    // Activity ring (skip normal logic while outcome flash is active)
+    if (this.outcomeFlash) {
+      // Handled below in outcome flash section
+    } else
     // Activity ring (orange when waiting for user, green otherwise)
     if (this._isWaiting) {
       // Persistent pulsing orange ring when waiting for user input
@@ -917,6 +978,39 @@ export class AgentSprite {
       this.planPulseTimer += dt * 0.003;
       const pulseAlpha = 0.7 + 0.3 * Math.sin(this.planPulseTimer);
       this.drawPlanBadge(pulseAlpha);
+    }
+
+    // Compacting badge pulse
+    if (this._isCompacting && this.compactBadge?.visible) {
+      this.compactPulseTimer += dt * 0.003;
+      const pulseAlpha = 0.65 + 0.35 * Math.sin(this.compactPulseTimer * 1.5);
+      this.drawCompactBadge(pulseAlpha);
+      // Gently rotate the ↺ symbol via badge scale oscillation
+      const scaleX = 1 + 0.04 * Math.sin(this.compactPulseTimer * 2);
+      this.compactBadge.scale.set(scaleX, 1);
+    }
+
+    // Outcome flash (brief green or red ring)
+    if (this.outcomeFlash) {
+      this.outcomeFlash.timer -= dt;
+      if (this.outcomeFlash.timer <= 0) {
+        this.outcomeFlash = null;
+        this.activityRing.visible = false;
+      } else {
+        const progress = this.outcomeFlash.timer / AgentSprite.OUTCOME_FLASH_DURATION;
+        const alpha = progress * 0.85;
+        const radius = this.spriteHeight / 2 + 6 + (1 - progress) * 8;
+        const color = this.outcomeFlash.outcome === 'success' ? 0x4ade80 : 0xf87171;
+        this.activityRing.visible = true;
+        this.activityRing.clear();
+        this.activityRing
+          .circle(0, 0, radius)
+          .stroke({ color, width: 3, alpha });
+        // Second expanding ring
+        this.activityRing
+          .circle(0, 0, radius + 4)
+          .stroke({ color, width: 1.5, alpha: alpha * 0.4 });
+      }
     }
 
     // Anomaly badge pulse

@@ -46,6 +46,7 @@ export class AnalyticsPanel {
   private toolCounts = new Map<string, number>();
   private zoneTime = new Map<ZoneId, number>();
   private _customizationLookup: ((agent: AgentState) => { displayName: string; colorIndex: number }) | null = null;
+  private onAgentUpdateBound: (agent: AgentState) => void;
 
   setCustomizationLookup(lookup: (agent: AgentState) => { displayName: string; colorIndex: number }): void {
     this._customizationLookup = lookup;
@@ -76,13 +77,14 @@ export class AnalyticsPanel {
     this.sampleTimer = setInterval(() => this.takeSample(), SAMPLE_INTERVAL);
 
     // Listen for updates
-    this.store.on('agent:update', (agent: AgentState) => {
+    this.onAgentUpdateBound = (agent: AgentState) => {
       this.checkThreshold();
       if (agent.currentTool) {
         const count = this.toolCounts.get(agent.currentTool) ?? 0;
         this.toolCounts.set(agent.currentTool, count + 1);
       }
-    });
+    };
+    this.store.on('agent:update', this.onAgentUpdateBound);
   }
 
   show(): void {
@@ -277,6 +279,11 @@ export class AnalyticsPanel {
       </div>
 
       <div class="analytics-section">
+        <div class="section-title">Cost Efficiency</div>
+        ${this.renderCostEfficiency(snapshots, totalCost)}
+      </div>
+
+      <div class="analytics-section">
         <div class="section-title">Session Duration</div>
         ${this.renderSessionDurations(snapshots)}
       </div>
@@ -406,10 +413,20 @@ export class AnalyticsPanel {
     return sorted.map(([tool, count]) => {
       const pct = maxCount > 0 ? (count / maxCount) * 100 : 0;
       const color = tool.startsWith('mcp__') ? '#60a5fa' : '#a78bfa';
+      // Shorten long MCP tool names: mcp__server__tool → server / tool
+      let displayName = tool;
+      if (tool.startsWith('mcp__')) {
+        const parts = tool.slice(5).split('__');
+        if (parts.length >= 2) {
+          const server = parts.slice(0, -1).join('/');
+          const method = parts[parts.length - 1];
+          displayName = `${server} / ${method}`;
+        }
+      }
 
       return `<div class="tool-bar">
         <div class="tool-bar-label">
-          <span class="tool-bar-name">${escapeHtml(tool)}</span>
+          <span class="tool-bar-name" title="${escapeHtml(tool)}">${escapeHtml(displayName)}</span>
           <span class="tool-bar-count">${count}</span>
         </div>
         <div class="tool-bar-track">
@@ -417,6 +434,46 @@ export class AnalyticsPanel {
         </div>
       </div>`;
     }).join('');
+  }
+
+  private renderCostEfficiency(snapshots: AgentSnapshot[], totalCost: number): string {
+    const totalToolUses = Array.from(this.toolCounts.values()).reduce((a, b) => a + b, 0);
+    const costPerTool = totalToolUses > 0 ? totalCost / totalToolUses : 0;
+    const totalTokens = snapshots.reduce((s, a) => s + a.inputTokens + a.outputTokens, 0);
+    const tokensPerTool = totalToolUses > 0 ? totalTokens / totalToolUses : 0;
+
+    // Cost per agent per minute
+    const now = Date.now();
+    const agentRates = snapshots
+      .map(a => {
+        const mins = Math.max((now - a.spawnedAt) / 60_000, 0.5);
+        const cost = this.calculateCost(a);
+        return { name: a.name, rate: cost / mins, cost };
+      })
+      .filter(a => a.cost > 0.001)
+      .sort((a, b) => b.rate - a.rate);
+
+    return `
+      <div class="analytics-cards" style="margin-bottom:8px">
+        <div class="analytics-card">
+          <div class="card-label">Cost / Tool Use</div>
+          <div class="card-value">$${costPerTool.toFixed(4)}</div>
+          <div class="card-sub">${totalToolUses} total uses</div>
+        </div>
+        <div class="analytics-card">
+          <div class="card-label">Tokens / Tool Use</div>
+          <div class="card-value">${formatTokens(Math.round(tokensPerTool))}</div>
+          <div class="card-sub">${formatTokens(totalTokens)} total</div>
+        </div>
+      </div>
+      ${agentRates.length > 0 ? `<div class="cost-rate-header">Cost rate ($/min)</div>` +
+        agentRates.slice(0, 5).map(a =>
+          `<div class="cost-rate-row">
+            <span class="cost-rate-name">${escapeHtml(a.name)}</span>
+            <span class="cost-rate-value">$${a.rate.toFixed(4)}/min</span>
+          </div>`
+        ).join('') : ''}
+    `;
   }
 
   private renderSessionDurations(snapshots: AgentSnapshot[]): string {
@@ -442,6 +499,7 @@ export class AnalyticsPanel {
   dispose(): void {
     clearInterval(this.refreshTimer);
     clearInterval(this.sampleTimer);
+    this.store.off('agent:update', this.onAgentUpdateBound);
     this.contentEl.remove();
     this.alertEl?.remove();
   }

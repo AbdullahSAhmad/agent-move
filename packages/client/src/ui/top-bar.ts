@@ -1,4 +1,3 @@
-import type { AgentState } from '@agent-move/shared';
 import { computeAgentCost } from '@agent-move/shared';
 import type { StateStore } from '../connection/state-store.js';
 import { formatTokens } from '../utils/formatting.js';
@@ -16,35 +15,39 @@ interface TokenSample {
 const VELOCITY_WINDOW = 60_000;
 const SAMPLE_INTERVAL = 2_000;
 
-export type NavTab = 'monitor' | 'analytics' | 'leaderboard' | 'toolchain' | 'taskgraph';
+export type NavTab = 'monitor' | 'analytics' | 'leaderboard' | 'toolchain' | 'taskgraph' | 'activity' | 'waterfall' | 'graph';
 
 export class TopBar {
   private store: StateStore;
   private refreshTimer: ReturnType<typeof setInterval>;
   private sampleTimer: ReturnType<typeof setInterval>;
   private samples: TokenSample[] = [];
-  private activeTab: NavTab = 'monitor';
-  private onTabChange: ((tab: NavTab) => void) | null = null;
-
   private connectionDot: HTMLElement;
+  private hooksDot: HTMLElement;
   private focusBar: HTMLElement;
+  private hookEventCount = 0;
+  private onHooksStatusBound: () => void;
+  private onPermRequestBound: () => void;
+  private onPermResolvedBound: () => void;
+  private onConnectionStatusBound: (status: import('../connection/state-store.js').ConnectionStatus) => void;
 
   constructor(store: StateStore) {
     this.store = store;
 
     this.connectionDot = document.getElementById('connection-dot')!;
+    this.hooksDot = document.getElementById('hooks-dot')!;
     this.focusBar = document.getElementById('focus-sub-bar')!;
 
-    // Nav tabs
-    document.querySelectorAll('.tb-nav-tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        const tabName = (tab as HTMLElement).dataset.tab as NavTab;
-        this.setActiveTab(tabName);
-      });
-    });
+    // Track hook event count
+    this.onHooksStatusBound = () => { this.hookEventCount++; };
+    this.onPermRequestBound = () => { this.hookEventCount++; };
+    this.onPermResolvedBound = () => { this.hookEventCount++; };
+    store.on('hooks:status', this.onHooksStatusBound);
+    store.on('permission:request', this.onPermRequestBound);
+    store.on('permission:resolved', this.onPermResolvedBound);
 
     // Connection status
-    this.store.on('connection:status', (status) => {
+    this.onConnectionStatusBound = (status) => {
       const isConnected = status === 'connected';
       this.connectionDot.classList.toggle('connected', isConnected);
       this.connectionDot.classList.toggle('disconnected', !isConnected);
@@ -52,42 +55,12 @@ export class TopBar {
 
       const bar = document.getElementById('disconnected-bar')!;
       bar.classList.toggle('visible', !isConnected);
-    });
+    };
+    this.store.on('connection:status', this.onConnectionStatusBound);
 
     // Stats updates
     this.refreshTimer = setInterval(() => this.updateStats(), 1000);
     this.sampleTimer = setInterval(() => this.takeSample(), SAMPLE_INTERVAL);
-  }
-
-  setTabChangeHandler(handler: (tab: NavTab) => void): void {
-    this.onTabChange = handler;
-  }
-
-  getActiveTab(): NavTab {
-    return this.activeTab;
-  }
-
-  setActiveTab(tab: NavTab): void {
-    if (tab === this.activeTab) {
-      // Clicking active non-monitor tab closes the panel
-      if (tab !== 'monitor') {
-        this.activeTab = 'monitor';
-        this.updateTabUI();
-        this.onTabChange?.('monitor');
-      }
-      return;
-    }
-    this.activeTab = tab;
-    this.updateTabUI();
-    this.onTabChange?.(tab);
-  }
-
-  private updateTabUI(): void {
-    document.querySelectorAll('.tb-nav-tab').forEach(el => {
-      const t = (el as HTMLElement).dataset.tab;
-      el.classList.toggle('active', t === this.activeTab);
-      el.setAttribute('aria-selected', String(t === this.activeTab));
-    });
   }
 
   showFocus(name: string): void {
@@ -146,10 +119,27 @@ export class TopBar {
 
     const activeDot = document.querySelector('#tb-active .tb-stat-dot') as HTMLElement;
     if (activeDot) activeDot.classList.toggle('pulse', active > 0);
+
+    // Hooks status dot
+    const pendingCount = this.store.getPendingPermissions().length;
+    const hooksActive = this.store.isHooksActive();
+    this.hooksDot.classList.toggle('hooks-pending', pendingCount > 0);
+    this.hooksDot.classList.toggle('hooks-active', hooksActive && pendingCount === 0);
+    if (pendingCount > 0) {
+      this.hooksDot.title = `Hooks: ${pendingCount} permission${pendingCount > 1 ? 's' : ''} pending | ${this.hookEventCount} events received`;
+    } else if (hooksActive) {
+      this.hooksDot.title = `Hooks: active | ${this.hookEventCount} events received`;
+    } else {
+      this.hooksDot.title = 'Hooks: not detected (run `agent-move hooks install`)';
+    }
   }
 
   dispose(): void {
     clearInterval(this.refreshTimer);
     clearInterval(this.sampleTimer);
+    this.store.off('hooks:status', this.onHooksStatusBound);
+    this.store.off('permission:request', this.onPermRequestBound);
+    this.store.off('permission:resolved', this.onPermResolvedBound);
+    this.store.off('connection:status', this.onConnectionStatusBound);
   }
 }

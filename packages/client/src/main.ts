@@ -11,9 +11,10 @@ import { NotificationManager } from './audio/notification-manager.js';
 import { ZoneHeatmap } from './ui/zone-heatmap.js';
 import { CommandPalette } from './ui/command-palette.js';
 import { AnalyticsPanel } from './ui/analytics-panel.js';
-import { LayoutEditor, applySavedLayout } from './ui/layout-editor.js';
+import { applySavedLayout } from './ui/layout-editor.js';
 import { TopBar } from './ui/top-bar.js';
 import type { NavTab } from './ui/top-bar.js';
+import { Sidebar } from './ui/sidebar.js';
 import { ToastManager } from './ui/toast-manager.js';
 import { ShortcutsHelp } from './ui/shortcuts-help.js';
 import { SessionExport } from './ui/session-export.js';
@@ -29,6 +30,12 @@ import { ThemeManager } from './world/themes/theme-manager.js';
 import { ZoneAnnotations } from './ui/zone-annotations.js';
 import { ToolChainPanel } from './ui/tool-chain-panel.js';
 import { TaskGraphPanel } from './ui/task-graph-panel.js';
+import { PermissionPanel } from './ui/permission-panel.js';
+import { NotificationPanel } from './ui/notification-panel.js';
+import { ActivityFeed } from './ui/activity-feed.js';
+import { WaterfallPanel } from './ui/waterfall-panel.js';
+import { RelationshipGraph } from './ui/relationship-graph.js';
+import { AgentHoverBar } from './ui/agent-hover-bar.js';
 
 async function main() {
   const appEl = document.getElementById('app')!;
@@ -45,8 +52,8 @@ async function main() {
   // Init world (zones, grid, camera)
   const world = new WorldManager(pixiApp);
 
-  // Init layout editor
-  const layoutEditor = new LayoutEditor(world);
+  // Layout editor hidden for now (needs more work)
+  // const layoutEditor = new LayoutEditor(world);
 
   // Init agent manager
   const agentManager = new AgentManager(pixiApp, world, store);
@@ -59,6 +66,9 @@ async function main() {
 
   // ── Top Bar ──
   const topBar = new TopBar(store);
+
+  // ── Sidebar Navigation ──
+  const sidebar = new Sidebar();
 
   // ── Right Panel: Overlay (agent list) ──
   const overlay = new Overlay(store);
@@ -80,6 +90,32 @@ async function main() {
     agentManager.setFocusAgent(agentId);
     focusModeActive = true;
     updateFocusIndicator();
+  });
+
+  // ── Agent Hover Bar (quick actions on sprite hover) ──
+  const hoverBar = new AgentHoverBar(store);
+  hoverBar.setFocusHandler((agentId) => {
+    agentManager.setFocusAgent(agentId);
+    focusModeActive = true;
+    updateFocusIndicator();
+  });
+  hoverBar.setDetailHandler((agentId) => {
+    detailPanel.open(agentId);
+    agentManager.setFocusAgent(agentId);
+    focusModeActive = true;
+    updateFocusIndicator();
+  });
+  agentManager.setHoverHandler((agentId, x, y) => {
+    if (agentId) {
+      // Convert world coords to screen coords, accounting for canvas position on page
+      const root = world.root;
+      const canvasX = x * root.scale.x + root.x;
+      const canvasY = y * root.scale.y + root.y;
+      const rect = pixiApp.canvas.getBoundingClientRect();
+      hoverBar.show(agentId, canvasX + rect.left, canvasY + rect.top);
+    } else {
+      hoverBar.hide();
+    }
   });
 
   // Init timeline
@@ -104,6 +140,21 @@ async function main() {
 
   // ── Zone Annotations ──
   const zoneAnnotations = new ZoneAnnotations();
+
+  // ── Activity Feed (in right panel) ──
+  const activityFeed = new ActivityFeed(store, rightPanelContent);
+
+  // ── Waterfall Trace View (in right panel) ──
+  const waterfallPanel = new WaterfallPanel(store, rightPanelContent);
+
+  // ── Agent Relationship Graph (in right panel) ──
+  const relationshipGraph = new RelationshipGraph(store, rightPanelContent);
+
+  // ── Permission Panel (floating) ──
+  const permissionPanel = new PermissionPanel(store);
+
+  // ── Notification Panel ──
+  const notificationPanel = new NotificationPanel(store);
 
   // ── Toast Notifications ──
   const toasts = new ToastManager(store);
@@ -134,6 +185,14 @@ async function main() {
   overlay.setCustomizationLookup(custLookup);
   leaderboard.setCustomizationLookup(custLookup);
   analytics.setCustomizationLookup(custLookup);
+  waterfallPanel.setCustomizationLookup(custLookup);
+  relationshipGraph.setCustomizationLookup(custLookup);
+  activityFeed.setCustomizationLookup(custLookup);
+  toasts.setCustomizationLookup(custLookup);
+  notificationPanel.setCustomizationLookup(custLookup);
+  timeline.setCustomizationLookup(custLookup);
+  sessionExport.setCustomizationLookup(custLookup);
+
   customizer.setChangeHandler((agentId, data) => {
     agentManager.applyCustomization(agentId, data.displayName, data.colorIndex);
     if (detailPanel.currentAgentId === agentId) {
@@ -196,6 +255,9 @@ async function main() {
     if (currentTab === 'leaderboard') leaderboard.hide();
     if (currentTab === 'toolchain') toolChainPanel.hide();
     if (currentTab === 'taskgraph') taskGraphPanel.hide();
+    if (currentTab === 'activity') activityFeed.hide();
+    if (currentTab === 'waterfall') waterfallPanel.hide();
+    if (currentTab === 'graph') relationshipGraph.hide();
 
     currentTab = tab;
 
@@ -215,6 +277,9 @@ async function main() {
         leaderboard: 'Leaderboard',
         toolchain: 'Tool Chains',
         taskgraph: 'Task Graph',
+        activity: 'Activity Feed',
+        waterfall: 'Waterfall',
+        graph: 'Agent Graph',
       };
       rightPanelTitle.textContent = titles[tab] ?? tab;
 
@@ -222,11 +287,14 @@ async function main() {
       else if (tab === 'leaderboard') leaderboard.show();
       else if (tab === 'toolchain') toolChainPanel.show();
       else if (tab === 'taskgraph') taskGraphPanel.show();
+      else if (tab === 'activity') activityFeed.show();
+      else if (tab === 'waterfall') waterfallPanel.show();
+      else if (tab === 'graph') relationshipGraph.show();
     }
   }
 
-  // Tab switching
-  topBar.setTabChangeHandler((tab: NavTab) => {
+  // Tab switching (sidebar is primary nav, topBar still manages stats)
+  sidebar.setTabChangeHandler((tab: NavTab) => {
     switchRightPanel(tab);
   });
 
@@ -261,8 +329,7 @@ async function main() {
       case 'toggle-mute':
         sound.init();
         sound.muted = !sound.muted;
-        muteBtn.textContent = sound.muted ? '\u{1F507}' : '\u{1F508}';
-        muteBtn.classList.toggle('muted', sound.muted);
+        updateMuteIcon();
         break;
       case 'toggle-heatmap':
         heatmapVisible = !heatmapVisible;
@@ -271,9 +338,9 @@ async function main() {
         break;
       case 'toggle-analytics':
         if (currentTab === 'analytics') {
-          topBar.setActiveTab('monitor');
+          sidebar.setActiveTab('monitor');
         } else {
-          topBar.setActiveTab('analytics');
+          sidebar.setActiveTab('analytics');
         }
         break;
       case 'timeline-live':
@@ -305,9 +372,9 @@ async function main() {
         break;
       case 'toggle-leaderboard':
         if (currentTab === 'leaderboard') {
-          topBar.setActiveTab('monitor');
+          sidebar.setActiveTab('monitor');
         } else {
-          topBar.setActiveTab('leaderboard');
+          sidebar.setActiveTab('leaderboard');
         }
         break;
       case 'cycle-theme':
@@ -318,16 +385,37 @@ async function main() {
         break;
       case 'toggle-toolchain':
         if (currentTab === 'toolchain') {
-          topBar.setActiveTab('monitor');
+          sidebar.setActiveTab('monitor');
         } else {
-          topBar.setActiveTab('toolchain');
+          sidebar.setActiveTab('toolchain');
         }
         break;
       case 'toggle-taskgraph':
         if (currentTab === 'taskgraph') {
-          topBar.setActiveTab('monitor');
+          sidebar.setActiveTab('monitor');
         } else {
-          topBar.setActiveTab('taskgraph');
+          sidebar.setActiveTab('taskgraph');
+        }
+        break;
+      case 'toggle-activity':
+        if (currentTab === 'activity') {
+          sidebar.setActiveTab('monitor');
+        } else {
+          sidebar.setActiveTab('activity');
+        }
+        break;
+      case 'toggle-waterfall':
+        if (currentTab === 'waterfall') {
+          sidebar.setActiveTab('monitor');
+        } else {
+          sidebar.setActiveTab('waterfall');
+        }
+        break;
+      case 'toggle-graph':
+        if (currentTab === 'graph') {
+          sidebar.setActiveTab('monitor');
+        } else {
+          sidebar.setActiveTab('graph');
         }
         break;
     }
@@ -349,13 +437,35 @@ async function main() {
   document.getElementById('zoom-out')!.addEventListener('click', () => world.camera.zoomOut());
   document.getElementById('zoom-reset')!.addEventListener('click', () => world.resetCamera());
 
-  // Audio controls (mute button in top bar)
+  // Audio controls (mute button + volume slider in top bar)
   const muteBtn = document.getElementById('mute-btn')!;
+  const volumeSlider = document.getElementById('volume-slider') as HTMLInputElement;
+
+  function updateMuteIcon(): void {
+    muteBtn.textContent = sound.muted || sound.volume === 0 ? '\u{1F507}' : '\u{1F508}';
+    muteBtn.classList.toggle('muted', sound.muted || sound.volume === 0);
+  }
+
   muteBtn.addEventListener('click', () => {
     sound.init();
     sound.muted = !sound.muted;
-    muteBtn.textContent = sound.muted ? '\u{1F507}' : '\u{1F508}';
-    muteBtn.classList.toggle('muted', sound.muted);
+    updateMuteIcon();
+  });
+
+  volumeSlider.addEventListener('input', () => {
+    sound.init();
+    sound.volume = Number(volumeSlider.value) / 100;
+    if (sound.muted && sound.volume > 0) {
+      sound.muted = false;
+    }
+    updateMuteIcon();
+  });
+
+  // Notification button
+  const notifBtn = document.getElementById('notif-btn')!;
+  notifBtn.appendChild(notificationPanel.getBadgeElement());
+  notifBtn.addEventListener('click', () => {
+    notificationPanel.toggle();
   });
 
   // Shortcuts button
@@ -383,9 +493,9 @@ async function main() {
     switch (e.key) {
       case 'a':
         if (currentTab === 'analytics') {
-          topBar.setActiveTab('monitor');
+          sidebar.setActiveTab('monitor');
         } else {
-          topBar.setActiveTab('analytics');
+          sidebar.setActiveTab('analytics');
         }
         break;
       case 'h':
@@ -396,8 +506,7 @@ async function main() {
       case 'm':
         sound.init();
         sound.muted = !sound.muted;
-        muteBtn.textContent = sound.muted ? '\u{1F507}' : '\u{1F508}';
-        muteBtn.classList.toggle('muted', sound.muted);
+        updateMuteIcon();
         break;
       case 'f':
         if (!focusModeActive) {
@@ -433,9 +542,9 @@ async function main() {
         break;
       case 'l':
         if (currentTab === 'leaderboard') {
-          topBar.setActiveTab('monitor');
+          sidebar.setActiveTab('monitor');
         } else {
-          topBar.setActiveTab('leaderboard');
+          sidebar.setActiveTab('leaderboard');
         }
         break;
       case 'p':
@@ -446,19 +555,62 @@ async function main() {
         break;
       case 'c':
         if (currentTab === 'toolchain') {
-          topBar.setActiveTab('monitor');
+          sidebar.setActiveTab('monitor');
         } else {
-          topBar.setActiveTab('toolchain');
+          sidebar.setActiveTab('toolchain');
         }
         break;
       case 'g':
         if (currentTab === 'taskgraph') {
-          topBar.setActiveTab('monitor');
+          sidebar.setActiveTab('monitor');
         } else {
-          topBar.setActiveTab('taskgraph');
+          sidebar.setActiveTab('taskgraph');
         }
         break;
+      case 'v':
+        if (currentTab === 'activity') {
+          sidebar.setActiveTab('monitor');
+        } else {
+          sidebar.setActiveTab('activity');
+        }
+        break;
+      case 'w':
+        if (currentTab === 'waterfall') {
+          sidebar.setActiveTab('monitor');
+        } else {
+          sidebar.setActiveTab('waterfall');
+        }
+        break;
+      case 'r':
+        if (currentTab === 'graph') {
+          sidebar.setActiveTab('monitor');
+        } else {
+          sidebar.setActiveTab('graph');
+        }
+        break;
+      case '[':
+        sidebar.toggle();
+        break;
     }
+  });
+
+  // Cleanup on page unload — release resources and stop timers
+  window.addEventListener('beforeunload', () => {
+    ws.disconnect();
+    agentManager.dispose();
+    overlay.dispose();
+    detailPanel.dispose();
+    timeline.dispose();
+    analytics.dispose();
+    leaderboard.dispose();
+    topBar.dispose();
+    toasts.dispose();
+    notificationPanel.dispose();
+    permissionPanel.dispose();
+    waterfallPanel.destroy();
+    activityFeed.destroy();
+    minimap.dispose();
+    store.dispose();
   });
 
   // Game loop
@@ -472,7 +624,7 @@ async function main() {
       heatmap.updateTransform(root.x, root.y, root.scale.x);
     }
 
-    layoutEditor.updateTransform(root.x, root.y, root.scale.x);
+    // layoutEditor.updateTransform(root.x, root.y, root.scale.x);
     zoneAnnotations.updateTransform(root.x, root.y, root.scale.x);
 
     if (focusModeActive) {

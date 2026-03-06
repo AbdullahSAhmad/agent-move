@@ -16,6 +16,8 @@ interface ManagedAgent {
   state: AgentState;
   /** Whether we already notified for this agent's waiting state (avoid spamming) */
   notifiedWaiting: boolean;
+  /** Last observed tool outcome to detect changes */
+  lastSeenOutcome: 'success' | 'failure' | null;
 }
 
 /** Tool name -> icon mapping for speech bubbles */
@@ -57,6 +59,7 @@ export class AgentManager {
   private onIdleBound: (agent: AgentState) => void;
   private onShutdownBound: (agentId: string) => void;
   private onResetBound: (agents: Map<string, AgentState>) => void;
+  private onAnomalyBound: (anomaly: import('@agent-move/shared').AnomalyEvent) => void;
 
   setSoundManager(sound: SoundManager): void {
     this.sound = sound;
@@ -126,12 +129,13 @@ export class AgentManager {
     this.store.on('state:reset', this.onResetBound);
 
     // Anomaly badge on sprites
-    this.store.on('anomaly:alert', (anomaly) => {
+    this.onAnomalyBound = (anomaly) => {
       const managed = this.agents.get(anomaly.agentId);
       if (managed) {
         managed.sprite.setAnomaly(anomaly.kind);
       }
-    });
+    };
+    this.store.on('anomaly:alert', this.onAnomalyBound);
   }
 
   /** Build rich speech messages from agent state */
@@ -180,6 +184,7 @@ export class AgentManager {
         icon: '\u{1F4DD}',
       });
     }
+
 
     // Text/speech message
     if (agent.speechText) {
@@ -245,7 +250,7 @@ export class AgentManager {
       sprite.setProjectName(agent.projectName);
     }
 
-    this.agents.set(agent.id, { sprite, state: agent, notifiedWaiting: false });
+    this.agents.set(agent.id, { sprite, state: agent, notifiedWaiting: false, lastSeenOutcome: null });
     this.world.addAgent(sprite.container);
 
     // Move to the agent's current zone
@@ -284,6 +289,13 @@ export class AgentManager {
 
     managed.sprite.setIdle(false);
     managed.sprite.setPlanning(agent.isPlanning);
+    managed.sprite.setCompacting(agent.phase === 'compacting');
+
+    // Flash outcome ring when tool outcome changes
+    if (agent.lastToolOutcome && agent.lastToolOutcome !== managed.lastSeenOutcome) {
+      managed.sprite.flashOutcome(agent.lastToolOutcome);
+    }
+    managed.lastSeenOutcome = agent.lastToolOutcome;
 
     // Waiting for user input — badge, sound, and notification
     managed.sprite.setWaiting(agent.isWaitingForUser);
@@ -356,9 +368,11 @@ export class AgentManager {
       managed.sprite.bumpActivity();
     }
 
-    // Play zone change sound if zone changed
+    // Play zone change sound and trigger flow line if zone changed
     if (prevZone !== agent.currentZone) {
       this.sound?.play('zone-change');
+      const palette = AGENT_PALETTES[this.getDisplayColorIndex(agent) % AGENT_PALETTES.length];
+      this.world.flowLines.triggerFlow(prevZone, agent.currentZone, palette.body);
     }
   }
 
@@ -371,6 +385,7 @@ export class AgentManager {
     managed.sprite.moveTo(target.x, target.y);
     managed.sprite.setIdle(true);
     managed.sprite.setWaiting(false);
+    managed.sprite.setCompacting(false);
     managed.sprite.clearSpeech();
     managed.notifiedWaiting = false;
     this.updateDocTitle();
@@ -593,6 +608,7 @@ export class AgentManager {
     this.store.off('agent:idle', this.onIdleBound);
     this.store.off('agent:shutdown', this.onShutdownBound);
     this.store.off('state:reset', this.onResetBound);
+    this.store.off('anomaly:alert', this.onAnomalyBound);
     for (const [, managed] of this.agents) {
       managed.sprite.destroy();
     }

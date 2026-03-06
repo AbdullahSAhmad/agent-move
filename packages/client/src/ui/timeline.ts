@@ -1,4 +1,4 @@
-import type { AgentState, TimelineEvent, ZoneId } from '@agent-move/shared';
+import type { AgentState, TimelineEvent } from '@agent-move/shared';
 import { AGENT_PALETTES } from '@agent-move/shared';
 import type { StateStore } from '../connection/state-store.js';
 
@@ -55,8 +55,13 @@ export class Timeline {
   private swimLabelsEl: HTMLElement;
   private trackWrapper: HTMLElement;
 
+  private _customizationLookup: ((agent: AgentState) => { displayName: string; colorIndex: number }) | null = null;
+
   // Bound event handlers (stored for cleanup)
   private resizeHandler = () => this.resizeCanvas();
+  private onTimelineBound: () => void;
+  private onSpawnBound: () => void;
+  private onShutdownBound: () => void;
 
   // Replay state
   private replayAgents = new Map<string, AgentState>();
@@ -171,19 +176,26 @@ export class Timeline {
     });
 
     // When new timeline snapshot arrives, re-render
-    this.store.on('timeline:snapshot', () => {
+    this.onTimelineBound = () => {
       this.updateAgentFilters();
       this.render();
-    });
+    };
+    this.store.on('timeline:snapshot', this.onTimelineBound);
 
     // Update agent filters when agents spawn/shutdown
-    this.store.on('agent:spawn', () => this.updateAgentFilters());
-    this.store.on('agent:shutdown', () => this.updateAgentFilters());
+    this.onSpawnBound = () => this.updateAgentFilters();
+    this.onShutdownBound = () => this.updateAgentFilters();
+    this.store.on('agent:spawn', this.onSpawnBound);
+    this.store.on('agent:shutdown', this.onShutdownBound);
 
     // Re-render periodically while live
     this.liveRenderTimer = setInterval(() => {
       if (this.isLive) this.render();
     }, 1000);
+  }
+
+  setCustomizationLookup(fn: (agent: AgentState) => { displayName: string; colorIndex: number }): void {
+    this._customizationLookup = fn;
   }
 
   setReplayCallback(cb: (agents: Map<string, AgentState>) => void): void {
@@ -194,6 +206,9 @@ export class Timeline {
     if (this.liveRenderTimer) clearInterval(this.liveRenderTimer);
     if (this.animId) cancelAnimationFrame(this.animId);
     window.removeEventListener('resize', this.resizeHandler);
+    this.store.off('timeline:snapshot', this.onTimelineBound);
+    this.store.off('agent:spawn', this.onSpawnBound);
+    this.store.off('agent:shutdown', this.onShutdownBound);
     this.el.remove();
   }
 
@@ -276,10 +291,11 @@ export class Timeline {
     const seen = new Map<string, { id: string; name: string; colorIndex: number }>();
     for (const e of events) {
       if (!seen.has(e.agent.id)) {
+        const custom = this._customizationLookup?.(e.agent);
         seen.set(e.agent.id, {
           id: e.agent.id,
-          name: e.agent.agentName || e.agent.projectName || e.agent.id.slice(0, 8),
-          colorIndex: e.agent.colorIndex,
+          name: custom?.displayName || e.agent.agentName || e.agent.projectName || e.agent.id.slice(0, 8),
+          colorIndex: custom?.colorIndex ?? e.agent.colorIndex,
         });
       }
     }

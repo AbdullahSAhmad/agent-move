@@ -1,8 +1,7 @@
 import type { AgentState, ActivityEntry } from '@agent-move/shared';
-import { AGENT_PALETTES, ZONE_MAP } from '@agent-move/shared';
+import { AGENT_PALETTES, ZONE_MAP, getProjectColorIndex } from '@agent-move/shared';
 import type { StateStore } from '../connection/state-store.js';
-import { escapeAttr, formatTokens, formatDuration, hexToCss } from '../utils/formatting.js';
-import { DiffViewerModal } from './diff-viewer-modal.js';
+import { escapeHtml, escapeAttr, truncate, formatTokens, formatTokenPair, formatDuration, hexToCss } from '../utils/formatting.js';
 
 /**
  * Slide-out detail panel for a selected agent.
@@ -14,9 +13,16 @@ export class AgentDetailPanel {
   private selectedAgentId: string | null = null;
   private entries: ActivityEntry[] = [];
   private historyListener: ((data: { agentId: string; entries: ActivityEntry[] }) => void) | null = null;
+  private onUpdateBound: (agent: AgentState) => void;
+  private onIdleBound: (agent: AgentState) => void;
+  private onShutdownBound: (agentId: string) => void;
   private _onCustomize: ((agent: AgentState) => void) | null = null;
   private _customizationLookup: ((agent: AgentState) => { displayName: string; colorIndex: number }) | null = null;
-  private diffModal: DiffViewerModal;
+
+  // Sparkline data
+  private tokenSamples: number[] = [];
+  private toolTimestamps: number[] = [];
+  private sparklineTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(store: StateStore) {
     this.store = store;
@@ -32,15 +38,12 @@ export class AgentDetailPanel {
             Back
           </button>
           <span class="detail-btn-spacer"></span>
-          <button id="detail-customize" title="Customize this agent">Edit</button>
-          <button id="detail-kill" title="Remove this agent">Kill</button>
+          <button id="detail-customize" title="Customize agent name and color">Edit</button>
+          <button id="detail-kill" title="Shut down this agent permanently">Kill</button>
         </div>
-        <div id="detail-name"></div>
-        <div id="detail-task"></div>
-        <div id="detail-meta"></div>
+        <div id="detail-card"></div>
       </div>
-      <div id="detail-stats"></div>
-      <div id="detail-git"></div>
+      <div id="detail-info"></div>
       <div class="detail-section-title">Activity Feed</div>
       <div id="detail-feed"></div>
     `;
@@ -50,8 +53,6 @@ export class AgentDetailPanel {
     } else {
       document.body.appendChild(this.panelEl);
     }
-
-    this.diffModal = new DiffViewerModal();
 
     // Back button
     this.panelEl.querySelector('#detail-back')!.addEventListener('click', () => this.close());
@@ -77,18 +78,31 @@ export class AgentDetailPanel {
     this.store.on('agent:history', this.historyListener);
 
     // Live updates for the selected agent
-    this.store.on('agent:update', (agent) => {
+    this.onUpdateBound = (agent) => {
       if (agent.id === this.selectedAgentId) {
-        this.renderStats(agent);
-        this.renderGitInfo(agent);
+        this.renderCardStats(agent);
+        this.renderInfo(agent);
+        // Track tool calls for velocity sparkline
+        if (agent.currentTool) {
+          const now = Date.now();
+          const last = this.toolTimestamps.length > 0 ? this.toolTimestamps[this.toolTimestamps.length - 1] : 0;
+          if (now - last > 1000) this.toolTimestamps.push(now);
+          // Trim old entries (5 min window)
+          const cutoff = now - 5 * 60 * 1000;
+          this.toolTimestamps = this.toolTimestamps.filter(ts => ts >= cutoff);
+        }
+        this.drawSparklines(agent);
       }
-    });
-    this.store.on('agent:idle', (agent) => {
-      if (agent.id === this.selectedAgentId) this.renderStats(agent);
-    });
-    this.store.on('agent:shutdown', (agentId) => {
+    };
+    this.onIdleBound = (agent) => {
+      if (agent.id === this.selectedAgentId) this.renderCardStats(agent);
+    };
+    this.onShutdownBound = (agentId) => {
       if (agentId === this.selectedAgentId) this.close();
-    });
+    };
+    this.store.on('agent:update', this.onUpdateBound);
+    this.store.on('agent:idle', this.onIdleBound);
+    this.store.on('agent:shutdown', this.onShutdownBound);
   }
 
   /** Set handler for the customize button */
@@ -120,14 +134,21 @@ export class AgentDetailPanel {
   open(agentId: string): void {
     this.selectedAgentId = agentId;
     this.entries = [];
+    this.tokenSamples = [];
+    this.toolTimestamps = [];
     this.panelEl.classList.add('open');
 
     const agent = this.store.getAgent(agentId);
     if (agent) {
       this.renderHeader(agent);
-      this.renderStats(agent);
-      this.renderGitInfo(agent);
+      this.renderInfo(agent);
+      // Seed first sample
+      this.tokenSamples.push(agent.totalInputTokens + agent.totalOutputTokens);
     }
+
+    // Start sparkline sampling
+    if (this.sparklineTimer) clearInterval(this.sparklineTimer);
+    this.sparklineTimer = setInterval(() => this.sampleSparkline(), 2000);
 
     // Request history from server
     this.store.requestHistory(agentId);
@@ -136,6 +157,10 @@ export class AgentDetailPanel {
   close(): void {
     this.selectedAgentId = null;
     this.panelEl.classList.remove('open');
+    if (this.sparklineTimer) {
+      clearInterval(this.sparklineTimer);
+      this.sparklineTimer = null;
+    }
   }
 
   isOpen(): boolean {
@@ -159,51 +184,165 @@ export class AgentDetailPanel {
     const borderColor = hexToCss(palette.body);
     const name = displayNameOverride || this.getDisplayName(agent);
 
-    const nameEl = this.panelEl.querySelector('#detail-name')!;
-    nameEl.innerHTML = `<span style="color:${borderColor}">\u25CF</span> ${escapeAttr(name)} <span class="detail-role">${agent.role.toUpperCase()}</span>`;
+    const statusClass = agent.isDone ? 'done' : agent.isIdle ? 'idle' : 'active';
+    const statusTitle = agent.isDone ? 'Agent finished' : agent.isIdle ? 'Agent is idle' : 'Agent is actively working';
 
-    // Task description
-    const taskEl = this.panelEl.querySelector('#detail-task') as HTMLElement | null;
-    if (taskEl) {
-      if (agent.taskDescription) {
-        taskEl.innerHTML = `<div class="detail-task-text">${escapeAttr(agent.taskDescription)}</div>`;
-        taskEl.style.display = '';
-      } else {
-        taskEl.style.display = 'none';
-      }
+    // Role badge
+    const roleBadges: Record<string, { label: string; color: string }> = {
+      'main': { label: 'MAIN', color: '#4a90d9' },
+      'subagent': { label: 'SUB', color: '#ab47bc' },
+      'team-lead': { label: 'LEAD', color: '#ff9800' },
+      'team-member': { label: 'MEMBER', color: '#26c6da' },
+    };
+    const rb = roleBadges[agent.role] ?? { label: agent.role.toUpperCase(), color: '#888' };
+    const roleBadge = `<span class="detail-role-badge" title="Agent role: ${rb.label}" style="background:${rb.color}33;color:${rb.color};">${rb.label}</span>`;
+
+    // Project badge
+    let projectBadge = '';
+    if (agent.projectName) {
+      const projColorIdx = agent.projectPath ? getProjectColorIndex(agent.projectPath) : colorIndex;
+      const projColor = hexToCss(AGENT_PALETTES[projColorIdx % AGENT_PALETTES.length].body);
+      projectBadge = `<span class="detail-project-badge" title="Project: ${escapeAttr(agent.projectName)}" style="background:${projColor}33;color:${projColor};">${escapeHtml(agent.projectName)}</span>`;
     }
 
-    const metaEl = this.panelEl.querySelector('#detail-meta')!;
+    const doneBadge = agent.isDone ? '<span class="detail-done-badge" title="Agent has finished">DONE</span>' : '';
 
-    // Resolve parent name using customization lookup
-    let parentHtml = '';
+    const cardEl = this.panelEl.querySelector('#detail-card')!;
+    cardEl.innerHTML = `
+      <div class="detail-card-inner" style="border-left: 3px solid ${borderColor};">
+        <div class="detail-card-top">
+          <div class="detail-card-name">
+            <span class="agent-status-dot ${statusClass}" title="${statusTitle}"></span>
+            ${escapeHtml(name)}${roleBadge}${projectBadge}${doneBadge}
+          </div>
+          <div class="detail-card-actions">
+            <canvas class="detail-velocity-canvas" width="60" height="16" title="Tool call frequency (last 5 min)"></canvas>
+            <span class="detail-health-dot" title="Agent health indicator"></span>
+            <canvas class="detail-sparkline-canvas" width="60" height="20" title="Token usage rate over time"></canvas>
+          </div>
+        </div>
+        ${agent.taskDescription ? `<div class="detail-card-task" title="${escapeAttr(agent.taskDescription)}">${escapeHtml(truncate(agent.taskDescription, 80))}</div>` : ''}
+        <div class="detail-card-zone" id="detail-zone-line"></div>
+        <div class="detail-card-tokens" id="detail-token-line"></div>
+      </div>
+    `;
+
+    // Render live stats into the card
+    this.renderCardStats(agent);
+  }
+
+  /** Update just the live-changing parts inside the card (zone, tool, tokens) */
+  private renderCardStats(agent: AgentState): void {
+    const zone = ZONE_MAP.get(agent.currentZone);
+    const zoneIcon = zone?.icon ?? '';
+    const zoneName = zone?.label ?? agent.currentZone;
+    const toolText = agent.currentTool ?? 'none';
+    const tokens = formatTokenPair(agent.totalInputTokens, agent.totalOutputTokens);
+
+    const zoneLine = this.panelEl.querySelector('#detail-zone-line');
+    if (zoneLine) {
+      zoneLine.innerHTML = `<span title="Current activity zone">${zoneIcon} ${zoneName}</span> <span class="detail-card-sep" title="Current tool">&middot;</span> <span class="detail-card-tool" title="Current tool: ${escapeAttr(toolText)}">${escapeHtml(toolText)}</span>`;
+    }
+
+    const tokenLine = this.panelEl.querySelector('#detail-token-line');
+    if (tokenLine) {
+      tokenLine.innerHTML = `<span title="Total token usage">${tokens}</span>`;
+    }
+
+    // Update health dot
+    const healthDot = this.panelEl.querySelector('.detail-health-dot') as HTMLElement | null;
+    if (healthDot) {
+      const color = agent.isDone || agent.isIdle ? '#888' : '#22c55e';
+      healthDot.style.background = color;
+      healthDot.title = agent.isDone ? 'Agent finished' : agent.isIdle ? 'Agent idle' : 'Agent healthy';
+    }
+  }
+
+  /** Render the info rows below the card (model, session, uptime, git, relations) */
+  private renderInfo(agent: AgentState): void {
+    const infoEl = this.panelEl.querySelector('#detail-info')!;
+
+    const rows: string[] = [];
+
+    // Uptime
+    rows.push(this.infoRow('Uptime', formatDuration(Date.now() - agent.spawnedAt), 'How long this agent has been running'));
+
+    // Model
+    if (agent.model) {
+      rows.push(this.infoRow('Model', `<code>${escapeAttr(agent.model)}</code>`, 'AI model powering this agent'));
+    }
+
+    // Session ID (copyable)
+    rows.push(this.infoRow(
+      'Session',
+      `<code class="detail-session-id" title="Click to copy full session ID">${agent.sessionId.slice(0, 16)}…</code>
+       <button class="detail-copy-btn" data-copy="${escapeAttr(agent.sessionId)}" title="Copy session ID to clipboard">
+         <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+       </button>`,
+      'Unique session identifier'
+    ));
+
+    // Team
+    if (agent.teamName) {
+      rows.push(this.infoRow('Team', escapeHtml(agent.teamName), 'Team this agent belongs to'));
+    }
+
+    // Git branch
+    if (agent.gitBranch) {
+      rows.push(this.infoRow('Branch', `<code>${escapeAttr(agent.gitBranch)}</code>`, 'Git branch this agent is working on'));
+    }
+
+    // Files
+    const editedCount = agent.recentDiffs ? new Set(agent.recentDiffs.map(d => d.filePath)).size : 0;
+    const totalFiles = agent.recentFiles ? agent.recentFiles.length : 0;
+    if (totalFiles > 0 || editedCount > 0) {
+      const parts: string[] = [];
+      if (totalFiles > 0) parts.push(`${totalFiles} touched`);
+      if (editedCount > 0) parts.push(`${editedCount} edited`);
+      rows.push(this.infoRow('Files', parts.join(', '), 'Files this agent has read or modified'));
+    }
+
+    // Parent
     if (agent.parentId) {
       const parent = this.store.getAgent(agent.parentId);
       const parentName = parent ? this.getDisplayName(parent) : agent.parentId.slice(0, 10);
-      parentHtml = `<div>Parent: <a href="#" class="detail-link" data-agent-id="${escapeAttr(agent.parentId)}">${escapeAttr(parentName)}</a></div>`;
+      rows.push(this.infoRow('Parent', `<a href="#" class="detail-link" data-agent-id="${escapeAttr(agent.parentId)}" title="Navigate to parent agent">${escapeHtml(parentName)}</a>`, 'The agent that spawned this one'));
     }
 
-    // Find children (subagents whose parentId = this agent), use customization lookup
-    let childrenHtml = '';
+    // Children
     const children = Array.from(this.store.getAgents().values()).filter(a => a.parentId === agent.id);
     if (children.length > 0) {
       const names = children.map(c => {
         const n = this.getDisplayName(c);
-        return `<a href="#" class="detail-link" data-agent-id="${escapeAttr(c.id)}">${escapeAttr(n)}</a>`;
+        return `<a href="#" class="detail-link" data-agent-id="${escapeAttr(c.id)}" title="Navigate to subagent">${escapeHtml(n)}</a>`;
       });
-      childrenHtml = `<div>Subagents: ${names.join(', ')}</div>`;
+      rows.push(this.infoRow('Subagents', names.join(', '), 'Child agents spawned by this agent'));
     }
 
-    metaEl.innerHTML = `
-      <div>Session: <code>${agent.sessionId.slice(0, 16)}...</code></div>
-      ${agent.model ? `<div>Model: <code>${escapeAttr(agent.model)}</code></div>` : ''}
-      ${agent.teamName ? `<div>Team: ${escapeAttr(agent.teamName)}</div>` : ''}
-      ${parentHtml}
-      ${childrenHtml}
-    `;
+    infoEl.innerHTML = rows.join('');
+
+    // Bind copy button
+    infoEl.querySelectorAll('.detail-copy-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const text = (btn as HTMLElement).dataset.copy;
+        if (text) {
+          navigator.clipboard.writeText(text).catch(() => {});
+          (btn as HTMLElement).classList.add('copied');
+          setTimeout(() => (btn as HTMLElement).classList.remove('copied'), 1200);
+        }
+      });
+    });
+
+    // Bind clickable session ID
+    infoEl.querySelectorAll('.detail-session-id').forEach(el => {
+      el.addEventListener('click', () => {
+        navigator.clipboard.writeText(agent.sessionId).catch(() => {});
+      });
+    });
 
     // Bind clickable links to navigate to parent/child
-    metaEl.querySelectorAll('.detail-link').forEach(el => {
+    infoEl.querySelectorAll('.detail-link').forEach(el => {
       el.addEventListener('click', (e) => {
         e.preventDefault();
         const targetId = (el as HTMLElement).dataset.agentId;
@@ -212,106 +351,95 @@ export class AgentDetailPanel {
     });
   }
 
-  private renderStats(agent: AgentState): void {
-    const zone = ZONE_MAP.get(agent.currentZone);
-    const zoneName = zone ? `${zone.icon} ${zone.label}` : agent.currentZone;
-    const totalTokens = agent.totalInputTokens + agent.totalOutputTokens;
-    const tokensStr = formatTokens(totalTokens);
-
-    const statsEl = this.panelEl.querySelector('#detail-stats')!;
-    statsEl.innerHTML = `
-      <div class="stat-row">
-        <span class="stat-label">Zone</span>
-        <span class="stat-value">${zoneName}</span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">Tool</span>
-        <span class="stat-value tool-val">${agent.currentTool ? escapeAttr(agent.currentTool) : '<span style="color:#666">none</span>'}</span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">Status</span>
-        <span class="stat-value">${agent.isIdle ? '<span style="color:#6b7280">Idle</span>' : '<span style="color:#4ade80">Active</span>'}</span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">Tokens</span>
-        <span class="stat-value">${tokensStr} <span style="color:#666">(${formatTokens(agent.totalInputTokens)} in / ${formatTokens(agent.totalOutputTokens)} out)</span></span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">Uptime</span>
-        <span class="stat-value">${formatDuration(Date.now() - agent.spawnedAt)}</span>
-      </div>
-    `;
+  private infoRow(label: string, value: string, tooltip: string): string {
+    return `<div class="detail-info-row" title="${escapeAttr(tooltip)}">
+      <span class="detail-info-label">${label}</span>
+      <span class="detail-info-value">${value}</span>
+    </div>`;
   }
 
-  private renderGitInfo(agent: AgentState): void {
-    const gitEl = this.panelEl.querySelector('#detail-git') as HTMLElement | null;
-    if (!gitEl) return;
+  private sampleSparkline(): void {
+    if (!this.selectedAgentId) return;
+    const agent = this.store.getAgent(this.selectedAgentId);
+    if (!agent) return;
+    this.tokenSamples.push(agent.totalInputTokens + agent.totalOutputTokens);
+    if (this.tokenSamples.length > 30) this.tokenSamples.shift();
+    this.drawSparklines(agent);
+  }
 
-    const hasBranch = !!agent.gitBranch;
-    const hasFiles = agent.recentFiles && agent.recentFiles.length > 0;
-    const hasDiffs = agent.recentDiffs && agent.recentDiffs.length > 0;
+  private drawSparklines(agent: AgentState): void {
+    // Token sparkline
+    const tokenCanvas = this.panelEl.querySelector('.detail-sparkline-canvas') as HTMLCanvasElement | null;
+    if (tokenCanvas && this.tokenSamples.length >= 2) {
+      const ctx = tokenCanvas.getContext('2d');
+      if (ctx) {
+        const w = tokenCanvas.width;
+        const h = tokenCanvas.height;
+        ctx.clearRect(0, 0, w, h);
 
-    if (!hasBranch && !hasFiles && !hasDiffs) {
-      gitEl.style.display = 'none';
-      return;
-    }
-
-    gitEl.style.display = '';
-    let html = '';
-    if (hasBranch) {
-      html += `<div class="stat-row"><span class="stat-label">&#128268; Branch</span><span class="stat-value"><code>${escapeAttr(agent.gitBranch!)}</code></span></div>`;
-    }
-
-    // Build a unified file list from recentFiles + any diff-only paths
-    // Group diffs by file path for count + modal lookup
-    const diffsByPath = new Map<string, typeof agent.recentDiffs>();
-    if (agent.recentDiffs) {
-      for (const d of agent.recentDiffs) {
-        let arr = diffsByPath.get(d.filePath);
-        if (!arr) { arr = []; diffsByPath.set(d.filePath, arr); }
-        arr.push(d);
-      }
-    }
-
-    // Merge: start with recentFiles, then add any diff paths not already listed
-    const allPaths: string[] = [];
-    const seen = new Set<string>();
-    if (agent.recentFiles) {
-      for (const f of agent.recentFiles) {
-        if (!seen.has(f)) { seen.add(f); allPaths.push(f); }
-      }
-    }
-    for (const p of diffsByPath.keys()) {
-      if (!seen.has(p)) { seen.add(p); allPaths.push(p); }
-    }
-
-    if (allPaths.length > 0) {
-      const fileList = allPaths.map(f => {
-        const short = f.replace(/\\/g, '/').split('/').slice(-2).join('/');
-        const diffs = diffsByPath.get(f);
-        const icon = diffs
-          ? `<span class="git-diff-icon" data-diff-path="${escapeAttr(f)}" title="View ${diffs.length} diff${diffs.length > 1 ? 's' : ''}">\u00b1${diffs.length > 1 ? diffs.length : ''}</span>`
-          : '';
-        return `<div class="git-file"><span class="git-file-name">${escapeAttr(short)}</span>${icon}</div>`;
-      }).join('');
-      html += `<div class="detail-section-title">&#128196; Files (${allPaths.length})</div><div class="git-file-list">${fileList}</div>`;
-    }
-
-    gitEl.innerHTML = html;
-
-    // Bind diff icon click handlers — opens modal, no inline expansion
-    gitEl.querySelectorAll('.git-diff-icon').forEach(el => {
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const path = (el as HTMLElement).dataset.diffPath;
-        if (path) {
-          const fileDiffs = diffsByPath.get(path);
-          if (fileDiffs && fileDiffs.length > 0) {
-            this.diffModal.open(path, fileDiffs);
-          }
+        const deltas: number[] = [];
+        for (let i = 1; i < this.tokenSamples.length; i++) {
+          deltas.push(Math.max(0, this.tokenSamples[i] - this.tokenSamples[i - 1]));
         }
-      });
-    });
+        const maxDelta = Math.max(...deltas, 1);
+        const stepX = w / Math.max(deltas.length - 1, 1);
+
+        ctx.beginPath();
+        ctx.moveTo(0, h);
+        for (let i = 0; i < deltas.length; i++) {
+          ctx.lineTo(i * stepX, h - (deltas[i] / maxDelta) * (h - 2) - 1);
+        }
+        ctx.lineTo((deltas.length - 1) * stepX, h);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(74, 222, 128, 0.15)';
+        ctx.fill();
+
+        ctx.beginPath();
+        for (let i = 0; i < deltas.length; i++) {
+          const x = i * stepX;
+          const y = h - (deltas[i] / maxDelta) * (h - 2) - 1;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = '#4ade80';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    }
+
+    // Tool velocity sparkline
+    const velCanvas = this.panelEl.querySelector('.detail-velocity-canvas') as HTMLCanvasElement | null;
+    if (velCanvas) {
+      const ctx = velCanvas.getContext('2d');
+      if (!ctx) return;
+      const w = velCanvas.width;
+      const h = velCanvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      const now = Date.now();
+      const windowSize = 30_000;
+      const numBars = 10;
+      const bars: number[] = new Array(numBars).fill(0);
+      for (const ts of this.toolTimestamps) {
+        const idx = Math.floor((now - ts) / windowSize);
+        if (idx >= 0 && idx < numBars) bars[numBars - 1 - idx]++;
+      }
+
+      const maxVal = Math.max(...bars, 1);
+      const barWidth = Math.floor(w / numBars) - 1;
+
+      const colorIndex = this.getDisplayColorIndex(agent);
+      const palette = AGENT_PALETTES[colorIndex % AGENT_PALETTES.length];
+      const barColor = hexToCss(palette.body);
+
+      for (let i = 0; i < numBars; i++) {
+        const val = bars[i] ?? 0;
+        const barHeight = Math.max(val > 0 ? 2 : 0, Math.round((val / maxVal) * (h - 2)));
+        ctx.fillStyle = barColor;
+        ctx.globalAlpha = val > 0 ? 0.8 : 0.15;
+        ctx.fillRect(i * (barWidth + 1), h - barHeight, barWidth, barHeight);
+      }
+      ctx.globalAlpha = 1.0;
+    }
   }
 
   private renderFeed(): void {
@@ -328,63 +456,57 @@ export class AgentDetailPanel {
     feedEl.scrollTop = 0;
   }
 
+  /** Make a path relative to the agent's project directory */
+  private relativePath(filePath: string): string {
+    if (!this.selectedAgentId) return filePath;
+    const agent = this.store.getAgent(this.selectedAgentId);
+    if (!agent?.projectPath) return filePath;
+    const projDir = agent.projectPath.replace(/\\/g, '/').replace(/\/$/, '') + '/';
+    const normalized = filePath.replace(/\\/g, '/');
+    return normalized.startsWith(projDir) ? normalized.slice(projDir.length) : normalized;
+  }
+
+  /** Shorten tool args — make any embedded file paths relative */
+  private shortenArgs(args: string): string {
+    if (!this.selectedAgentId) return args;
+    const agent = this.store.getAgent(this.selectedAgentId);
+    if (!agent?.projectPath) return args;
+    const projDir = agent.projectPath.replace(/\\/g, '/').replace(/\/$/, '') + '/';
+    return args.replace(/\\/g, '/').split(projDir).join('');
+  }
+
   private renderEntry(entry: ActivityEntry): string {
     const time = this.formatTime(entry.timestamp);
-    const timeHtml = `<span class="feed-time">${time}</span>`;
+    const t = `<span class="feed-time">${time}</span>`;
 
     switch (entry.kind) {
-      case 'tool':
-        return `<div class="feed-entry feed-tool">
-          ${timeHtml}
-          <span class="feed-icon">&#128295;</span>
-          <span class="feed-tool-name">${escapeAttr(entry.tool ?? 'unknown')}</span>
-          ${entry.toolArgs ? `<div class="feed-args">${escapeAttr(entry.toolArgs)}</div>` : ''}
-        </div>`;
+      case 'tool': {
+        const args = entry.toolArgs ? ` <span class="feed-args">${escapeAttr(this.shortenArgs(entry.toolArgs))}</span>` : '';
+        return `<div class="feed-entry feed-tool">${t} <span class="feed-icon">&#128295;</span> <span class="feed-tool-name">${escapeAttr(entry.tool ?? 'unknown')}</span>${args}</div>`;
+      }
 
-      case 'text':
-        return `<div class="feed-entry feed-text">
-          ${timeHtml}
-          <span class="feed-icon">&#128172;</span>
-          <span>${escapeAttr(entry.text ?? '')}</span>
-        </div>`;
+      case 'text': {
+        const text = entry.text ? this.shortenArgs(entry.text) : '';
+        return `<div class="feed-entry feed-text">${t} <span class="feed-icon">&#128172;</span> ${escapeAttr(text)}</div>`;
+      }
 
       case 'zone-change': {
         const from = ZONE_MAP.get(entry.prevZone!);
         const to = ZONE_MAP.get(entry.zone!);
-        return `<div class="feed-entry feed-zone">
-          ${timeHtml}
-          <span class="feed-icon">&#128694;</span>
-          ${from?.icon ?? ''} ${from?.label ?? entry.prevZone} &rarr; ${to?.icon ?? ''} ${to?.label ?? entry.zone}
-        </div>`;
+        return `<div class="feed-entry feed-zone">${t} <span class="feed-icon">&#128694;</span> ${from?.icon ?? ''} ${from?.label ?? entry.prevZone} &rarr; ${to?.icon ?? ''} ${to?.label ?? entry.zone}</div>`;
       }
 
       case 'spawn':
-        return `<div class="feed-entry feed-spawn">
-          ${timeHtml}
-          <span class="feed-icon">&#9889;</span>
-          Agent spawned
-        </div>`;
+        return `<div class="feed-entry feed-spawn">${t} <span class="feed-icon">&#9889;</span> Agent spawned</div>`;
 
       case 'idle':
-        return `<div class="feed-entry feed-idle">
-          ${timeHtml}
-          <span class="feed-icon">&#9749;</span>
-          Went idle
-        </div>`;
+        return `<div class="feed-entry feed-idle">${t} <span class="feed-icon">&#9749;</span> Went idle</div>`;
 
       case 'shutdown':
-        return `<div class="feed-entry feed-shutdown">
-          ${timeHtml}
-          <span class="feed-icon">&#128721;</span>
-          Agent shut down
-        </div>`;
+        return `<div class="feed-entry feed-shutdown">${t} <span class="feed-icon">&#128721;</span> Agent shut down</div>`;
 
       case 'tokens':
-        return `<div class="feed-entry feed-tokens">
-          ${timeHtml}
-          <span class="feed-icon">&#127916;</span>
-          +${formatTokens(entry.inputTokens ?? 0)} in / +${formatTokens(entry.outputTokens ?? 0)} out
-        </div>`;
+        return `<div class="feed-entry feed-tokens">${t} <span class="feed-icon">&#127916;</span> +${formatTokens(entry.inputTokens ?? 0)} in / +${formatTokens(entry.outputTokens ?? 0)} out</div>`;
 
       default:
         return '';
@@ -439,4 +561,12 @@ export class AgentDetailPanel {
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
 
+  dispose(): void {
+    if (this.sparklineTimer) clearInterval(this.sparklineTimer);
+    if (this.historyListener) this.store.off('agent:history', this.historyListener);
+    this.store.off('agent:update', this.onUpdateBound);
+    this.store.off('agent:idle', this.onIdleBound);
+    this.store.off('agent:shutdown', this.onShutdownBound);
+    this.panelEl.remove();
+  }
 }
