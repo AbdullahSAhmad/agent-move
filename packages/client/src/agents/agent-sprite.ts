@@ -416,21 +416,6 @@ export class AgentSprite {
     this.speechBubble.alpha = 1;
   }
 
-  /** Update the displayed name label (e.g. when agentName is discovered after spawn) */
-  updateName(agent: AgentState): void {
-    const rawName = agent.agentName || getFunnyName(agent.sessionId);
-    const name = rawName.length > 14 ? rawName.slice(0, 12) + '..' : rawName;
-    if (this.nameLabel.text !== name) {
-      this.nameLabel.text = name;
-      this.updateNameBg();
-    }
-  }
-
-  /** @deprecated Project label removed — sprite variant conveys project identity */
-  setProjectName(_name: string): void {
-    // no-op
-  }
-
   /** Override the displayed name with a custom one */
   setCustomName(name: string): void {
     const display = name.length > 14 ? name.slice(0, 12) + '..' : name;

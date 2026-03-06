@@ -245,11 +245,6 @@ export class AgentManager {
       sprite.rebuildTextures(customPalette, displayColorIndex, this.app.renderer);
     }
 
-    // Set project name label
-    if (agent.projectName) {
-      sprite.setProjectName(agent.projectName);
-    }
-
     this.agents.set(agent.id, { sprite, state: agent, notifiedWaiting: false, lastSeenOutcome: null });
     this.world.addAgent(sprite.container);
 
@@ -536,8 +531,6 @@ export class AgentManager {
         this.world.setZoneAgentCount(zone, 0);
       }
     }
-
-    this.world.update(deltaMs);
   }
 
   /** Update document title based on waiting agent count */

@@ -21,15 +21,10 @@ export class AgentStateManager extends EventEmitter {
   private shutdownTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Agents with a pending tool call (waiting for result) */
   private pendingTool = new Set<string>();
-  private colorCounter = 0;
   private activityHistory = new Map<string, ActivityEntry[]>();
   private timelineBuffer: TimelineEvent[] = [];
-  /** Queue of task descriptions from Agent tool calls, keyed by parent agent ID */
-  private pendingSubagentTasks = new Map<string, string[]>();
-  /** Queue of agent names from Agent tool calls, keyed by parent agent ID */
-  private pendingSubagentNames = new Map<string, string[]>();
-  /** Queue of team names from Agent tool calls, keyed by parent agent ID */
-  private pendingSubagentTeams = new Map<string, string[]>();
+  /** Compound queue of subagent metadata from Agent tool calls, keyed by parent agent ID */
+  private pendingSubagentInfo = new Map<string, Array<{ name: string | null; task: string | null; team: string | null }>>();
   /** Maps sessionId → canonical agent ID (for merging multiple sessions into one agent) */
   private sessionToAgent = new Map<string, string>();
   /** Maps rootSessionId:agentName → canonical agent ID (scoped per terminal session) */
@@ -67,18 +62,14 @@ export class AgentStateManager extends EventEmitter {
     return this.agents.get(id);
   }
 
-  /** Flush pending name/task/team queues — call after initial replay to prevent stale matches */
+  /** Flush pending subagent/recipient queues — call after initial replay to prevent stale matches */
   flushPendingQueues(): void {
-    const nameCount = Array.from(this.pendingSubagentNames.values()).reduce((n, q) => n + q.length, 0);
-    const taskCount = Array.from(this.pendingSubagentTasks.values()).reduce((n, q) => n + q.length, 0);
-    const teamCount = Array.from(this.pendingSubagentTeams.values()).reduce((n, q) => n + q.length, 0);
+    const infoCount = Array.from(this.pendingSubagentInfo.values()).reduce((n, q) => n + q.length, 0);
     const recipientCount = Array.from(this.pendingRecipients.values()).reduce((n, q) => n + q.length, 0);
-    this.pendingSubagentNames.clear();
-    this.pendingSubagentTasks.clear();
-    this.pendingSubagentTeams.clear();
+    this.pendingSubagentInfo.clear();
     this.pendingRecipients.clear();
-    if (nameCount + taskCount + teamCount + recipientCount > 0) {
-      console.log(`Flushed ${nameCount} pending names, ${taskCount} pending tasks, ${teamCount} pending teams, ${recipientCount} pending recipients from replay`);
+    if (infoCount + recipientCount > 0) {
+      console.log(`Flushed ${infoCount} pending subagent infos, ${recipientCount} pending recipients from replay`);
     }
   }
 
@@ -113,15 +104,13 @@ export class AgentStateManager extends EventEmitter {
       timestamp: event.timestamp,
     });
 
+    // Trim expired entries (chronological order — shift from front)
     const cutoff = Date.now() - MAX_HISTORY_AGE_MS;
-    const firstValid = this.timelineBuffer.findIndex(e => e.timestamp >= cutoff);
-    if (firstValid > 0) {
-      this.timelineBuffer.splice(0, firstValid);
-    } else if (firstValid === -1 && this.timelineBuffer.length > 0) {
-      this.timelineBuffer.length = 0;
+    while (this.timelineBuffer.length > 0 && this.timelineBuffer[0].timestamp < cutoff) {
+      this.timelineBuffer.shift();
     }
-    if (this.timelineBuffer.length > MAX_TIMELINE_EVENTS) {
-      this.timelineBuffer.splice(0, this.timelineBuffer.length - MAX_TIMELINE_EVENTS);
+    while (this.timelineBuffer.length > MAX_TIMELINE_EVENTS) {
+      this.timelineBuffer.shift();
     }
   }
 
@@ -133,15 +122,13 @@ export class AgentStateManager extends EventEmitter {
     }
     entries.push(entry);
 
+    // Trim expired entries (chronological order — shift from front)
     const cutoff = Date.now() - MAX_HISTORY_AGE_MS;
-    const firstValid = entries.findIndex(e => e.timestamp >= cutoff);
-    if (firstValid > 0) {
-      entries.splice(0, firstValid);
-    } else if (firstValid === -1 && entries.length > 0) {
-      entries.length = 0;
+    while (entries.length > 0 && entries[0].timestamp < cutoff) {
+      entries.shift();
     }
-    if (entries.length > MAX_HISTORY_PER_AGENT) {
-      entries.splice(0, entries.length - MAX_HISTORY_PER_AGENT);
+    while (entries.length > MAX_HISTORY_PER_AGENT) {
+      entries.shift();
     }
   }
 
@@ -399,11 +386,12 @@ export class AgentStateManager extends EventEmitter {
       // Compute rootSessionId (scopes all lookups to this terminal session)
       const rootSessionId = this.computeRootSessionId(sessionId, parentId, sessionInfo);
 
-      const taskDescription = parentId ? this.popPendingTask(parentId) : null;
-      const pendingTeam = parentId ? this.popPendingTeam(parentId) : null;
+      const pendingInfo = parentId ? this.popPendingInfo(parentId) : null;
+      const taskDescription = pendingInfo?.task ?? null;
+      const pendingTeam = pendingInfo?.team ?? null;
 
       // Try multiple sources for agent name: pending queue, routing sender, message recipient matching
-      let agentName = (parentId ? this.popPendingName(parentId) : null) ?? activity.agentName ?? null;
+      let agentName = pendingInfo?.name ?? activity.agentName ?? null;
       if (!agentName && activity.messageSender) {
         agentName = this.popRecipientBySender(rootSessionId, activity.messageSender);
       }
@@ -464,7 +452,7 @@ export class AgentStateManager extends EventEmitter {
         cacheReadTokens: 0,
         cacheCreationTokens: 0,
         model: activity.model ?? null,
-        colorIndex: this.colorCounter++ % 12,
+        colorIndex: getProjectColorIndex(sessionInfo.projectPath || sessionId),
         toolUseCount: 0,
         gitBranch: null,
         recentFiles: [],
@@ -483,13 +471,11 @@ export class AgentStateManager extends EventEmitter {
         this.hiddenAgents.add(sessionId);
         console.log(`Hiding new session ${sessionId.slice(0, 12)}… (pending identity)`);
 
-        // Timeout: silently discard if identity not discovered in time
+        // Timeout: promote with fallback name if identity not discovered in time
         const timer = setTimeout(() => {
           if (this.hiddenAgents.has(sessionId)) {
-            console.log(`Identity timeout for ${sessionId.slice(0, 12)}… — discarding (unidentified)`);
-            this.hiddenAgents.delete(sessionId);
-            this.agents.delete(sessionId);
-            this.clearTimers(sessionId);
+            console.log(`Identity timeout for ${sessionId.slice(0, 12)}… — promoting with fallback name`);
+            this.promoteAgent(sessionId);
           }
         }, IDENTITY_TIMEOUT_MS);
         this.identityTimers.set(sessionId, timer);
@@ -631,22 +617,17 @@ export class AgentStateManager extends EventEmitter {
           agent.messageTarget = null;
         }
 
-        // Queue name + description + team for incoming subagent
+        // Queue name + description + team for incoming subagent (as compound object)
         if (activity.toolName === 'Agent' && activity.toolInput) {
           const input = activity.toolInput as Record<string, unknown>;
           const desc = (input.description ?? input.prompt ?? '') as string;
-          if (desc) {
-            this.queuePendingTask(agentId, desc.length > 80 ? desc.slice(0, 77) + '...' : desc);
-          }
-          const name = input.name as string | undefined;
-          if (name) {
-            this.queuePendingName(agentId, name);
-          }
-          // Capture team_name from Agent tool to identify team members
-          const teamName = input.team_name as string | undefined;
-          if (teamName) {
-            this.queuePendingTeam(agentId, teamName);
-          }
+          const name = (input.name as string | undefined) ?? null;
+          const teamName = (input.team_name as string | undefined) ?? null;
+          this.queuePendingInfo(agentId, {
+            name,
+            task: desc ? (desc.length > 80 ? desc.slice(0, 77) + '...' : desc) : null,
+            team: teamName,
+          });
         }
 
         // Capture diff from Edit tool
@@ -765,41 +746,19 @@ export class AgentStateManager extends EventEmitter {
     return null;
   }
 
-  private enqueue(map: Map<string, string[]>, key: string, value: string): void {
-    let queue = map.get(key);
-    if (!queue) { queue = []; map.set(key, queue); }
-    queue.push(value);
+
+  private queuePendingInfo(parentId: string, info: { name: string | null; task: string | null; team: string | null }): void {
+    let queue = this.pendingSubagentInfo.get(parentId);
+    if (!queue) { queue = []; this.pendingSubagentInfo.set(parentId, queue); }
+    queue.push(info);
   }
 
-  private dequeue(map: Map<string, string[]>, key: string): string | null {
-    const queue = map.get(key);
+  private popPendingInfo(parentId: string): { name: string | null; task: string | null; team: string | null } | null {
+    const queue = this.pendingSubagentInfo.get(parentId);
     if (!queue || queue.length === 0) return null;
     return queue.shift()!;
   }
 
-  private queuePendingTask(parentId: string, description: string): void {
-    this.enqueue(this.pendingSubagentTasks, parentId, description);
-  }
-
-  private popPendingTask(parentId: string): string | null {
-    return this.dequeue(this.pendingSubagentTasks, parentId);
-  }
-
-  private queuePendingName(parentId: string, name: string): void {
-    this.enqueue(this.pendingSubagentNames, parentId, name);
-  }
-
-  private popPendingName(parentId: string): string | null {
-    return this.dequeue(this.pendingSubagentNames, parentId);
-  }
-
-  private queuePendingTeam(parentId: string, teamName: string): void {
-    this.enqueue(this.pendingSubagentTeams, parentId, teamName);
-  }
-
-  private popPendingTeam(parentId: string): string | null {
-    return this.dequeue(this.pendingSubagentTeams, parentId);
-  }
 
   private queueRecipient(rootSessionId: string, sender: string, recipient: string): void {
     let queue = this.pendingRecipients.get(rootSessionId);
@@ -943,9 +902,7 @@ export class AgentStateManager extends EventEmitter {
 
     this.agents.delete(sessionId);
     this.activityHistory.delete(sessionId);
-    this.pendingSubagentTasks.delete(sessionId);
-    this.pendingSubagentNames.delete(sessionId);
-    this.pendingSubagentTeams.delete(sessionId);
+    this.pendingSubagentInfo.delete(sessionId);
     this.anomalyDetector.removeAgent(sessionId);
     this.toolChainTracker.resetAgent(sessionId);
     // If no agents remain, fully clear tool chain data

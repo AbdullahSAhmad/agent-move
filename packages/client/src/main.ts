@@ -21,6 +21,7 @@ import { SessionExport } from './ui/session-export.js';
 import { Onboarding } from './ui/onboarding.js';
 import { ZONE_MAP, AGENT_PALETTES } from '@agent-move/shared';
 
+import { storageGet, storageSet } from './utils/storage.js';
 import { AgentTrails } from './effects/agent-trails.js';
 import { Minimap } from './ui/minimap.js';
 import { LeaderboardPanel } from './ui/leaderboard-panel.js';
@@ -52,9 +53,6 @@ async function main() {
   // Init world (zones, grid, camera)
   const world = new WorldManager(pixiApp);
 
-  // Layout editor hidden for now (needs more work)
-  // const layoutEditor = new LayoutEditor(world);
-
   // Init agent manager
   const agentManager = new AgentManager(pixiApp, world, store);
 
@@ -79,31 +77,21 @@ async function main() {
   // Wire agent click from overlay -> detail panel
   overlay.setAgentClickHandler((agentId) => {
     detailPanel.open(agentId);
-    agentManager.setFocusAgent(agentId);
-    focusModeActive = true;
-    updateFocusIndicator();
+    enterFocusMode(agentId);
   });
 
   // Wire agent click from canvas -> detail panel
   agentManager.setClickHandler((agentId) => {
     detailPanel.open(agentId);
-    agentManager.setFocusAgent(agentId);
-    focusModeActive = true;
-    updateFocusIndicator();
+    enterFocusMode(agentId);
   });
 
   // ── Agent Hover Bar (quick actions on sprite hover) ──
   const hoverBar = new AgentHoverBar(store);
-  hoverBar.setFocusHandler((agentId) => {
-    agentManager.setFocusAgent(agentId);
-    focusModeActive = true;
-    updateFocusIndicator();
-  });
+  hoverBar.setFocusHandler((agentId) => enterFocusMode(agentId));
   hoverBar.setDetailHandler((agentId) => {
     detailPanel.open(agentId);
-    agentManager.setFocusAgent(agentId);
-    focusModeActive = true;
-    updateFocusIndicator();
+    enterFocusMode(agentId);
   });
   agentManager.setHoverHandler((agentId, x, y) => {
     if (agentId) {
@@ -239,57 +227,59 @@ async function main() {
     }
   }
 
-  // Stop following button
-  document.getElementById('focus-stop')!.addEventListener('click', () => {
+  function enterFocusMode(agentId: string): void {
+    agentManager.setFocusAgent(agentId);
+    focusModeActive = true;
+    updateFocusIndicator();
+  }
+
+  function exitFocusMode(): void {
     focusModeActive = false;
     agentManager.setFocusAgent(null);
     updateFocusIndicator();
-  });
+  }
+
+  // Cached heatmap element
+  let heatmapEl: HTMLElement | null = null;
+  function getHeatmapEl(): HTMLElement | null {
+    if (!heatmapEl) heatmapEl = document.getElementById('zone-heatmap');
+    return heatmapEl;
+  }
+
+  // Stop following button
+  document.getElementById('focus-stop')!.addEventListener('click', exitFocusMode);
 
   // ── Panel State Management ──
-  let currentTab: NavTab = 'monitor';
+  let currentTab: NavTab = storageGet<NavTab>('activeTab', 'monitor');
+
+  const panelMap: Record<string, { show(): void; hide(): void; title: string }> = {
+    analytics:   { show: () => analytics.show(), hide: () => analytics.hide(), title: 'Analytics' },
+    leaderboard: { show: () => leaderboard.show(), hide: () => leaderboard.hide(), title: 'Leaderboard' },
+    toolchain:   { show: () => toolChainPanel.show(), hide: () => toolChainPanel.hide(), title: 'Tool Chains' },
+    taskgraph:   { show: () => taskGraphPanel.show(), hide: () => taskGraphPanel.hide(), title: 'Task Graph' },
+    activity:    { show: () => activityFeed.show(), hide: () => activityFeed.hide(), title: 'Activity Feed' },
+    waterfall:   { show: () => waterfallPanel.show(), hide: () => waterfallPanel.hide(), title: 'Waterfall' },
+    graph:       { show: () => relationshipGraph.show(), hide: () => relationshipGraph.hide(), title: 'Agent Graph' },
+  };
 
   function switchRightPanel(tab: NavTab): void {
-    // Hide previous content
-    if (currentTab === 'analytics') analytics.hide();
-    if (currentTab === 'leaderboard') leaderboard.hide();
-    if (currentTab === 'toolchain') toolChainPanel.hide();
-    if (currentTab === 'taskgraph') taskGraphPanel.hide();
-    if (currentTab === 'activity') activityFeed.hide();
-    if (currentTab === 'waterfall') waterfallPanel.hide();
-    if (currentTab === 'graph') relationshipGraph.hide();
+    storageSet('activeTab', tab);
 
+    // Hide previous panel
+    panelMap[currentTab]?.hide();
     currentTab = tab;
 
     if (tab === 'monitor') {
-      // Show agent list, hide content area
       overlayEl.style.display = '';
       rightPanelContent.style.display = 'none';
       rightPanelTitle.textContent = 'Agents';
     } else {
-      // Close detail panel if open, hide agent list, show content area
       if (detailPanel.isOpen()) detailPanel.close();
       overlayEl.style.display = 'none';
       rightPanelContent.style.display = '';
-
-      const titles: Record<string, string> = {
-        analytics: 'Analytics',
-        leaderboard: 'Leaderboard',
-        toolchain: 'Tool Chains',
-        taskgraph: 'Task Graph',
-        activity: 'Activity Feed',
-        waterfall: 'Waterfall',
-        graph: 'Agent Graph',
-      };
-      rightPanelTitle.textContent = titles[tab] ?? tab;
-
-      if (tab === 'analytics') analytics.show();
-      else if (tab === 'leaderboard') leaderboard.show();
-      else if (tab === 'toolchain') toolChainPanel.show();
-      else if (tab === 'taskgraph') taskGraphPanel.show();
-      else if (tab === 'activity') activityFeed.show();
-      else if (tab === 'waterfall') waterfallPanel.show();
-      else if (tab === 'graph') relationshipGraph.show();
+      const panel = panelMap[tab];
+      rightPanelTitle.textContent = panel?.title ?? tab;
+      panel?.show();
     }
   }
 
@@ -298,128 +288,78 @@ async function main() {
     switchRightPanel(tab);
   });
 
+  // Restore saved tab
+  if (currentTab !== 'monitor') {
+    sidebar.setActiveTab(currentTab);
+  }
+
   const rightPanel = document.getElementById('right-panel')!;
 
-  // ── Command Palette ──
-  const commandPalette = new CommandPalette(store, (action, payload) => {
+  // ── Shared Action Dispatcher ──
+  function toggleTab(tab: NavTab): void {
+    sidebar.setActiveTab(currentTab === tab ? 'monitor' : tab);
+  }
+
+  function executeAction(action: string, payload?: string): void {
     switch (action) {
       case 'focus-zone': {
-        const zone = ZONE_MAP.get(payload);
-        if (zone) {
-          world.camera.panTo(zone.x + zone.width / 2, zone.y + zone.height / 2);
-        }
+        const zone = payload ? ZONE_MAP.get(payload as import('@agent-move/shared').ZoneId) : null;
+        if (zone) world.camera.panTo(zone.x + zone.width / 2, zone.y + zone.height / 2);
         break;
       }
-      case 'focus-agent': {
-        detailPanel.open(payload);
-        agentManager.setFocusAgent(payload);
-        focusModeActive = true;
-        updateFocusIndicator();
+      case 'focus-agent':
+        if (payload) { detailPanel.open(payload); enterFocusMode(payload); }
         break;
-      }
-      case 'reset-camera':
-        world.resetCamera();
-        break;
-      case 'zoom-in':
-        world.camera.zoomIn();
-        break;
-      case 'zoom-out':
-        world.camera.zoomOut();
-        break;
+      case 'reset-camera':       world.resetCamera(); break;
+      case 'zoom-in':            world.camera.zoomIn(); break;
+      case 'zoom-out':           world.camera.zoomOut(); break;
       case 'toggle-mute':
-        sound.init();
-        sound.muted = !sound.muted;
-        updateMuteIcon();
-        break;
+        sound.init(); sound.muted = !sound.muted; updateMuteIcon(); break;
       case 'toggle-heatmap':
         heatmapVisible = !heatmapVisible;
-        const heatmapEl = document.getElementById('zone-heatmap');
-        if (heatmapEl) heatmapEl.style.display = heatmapVisible ? 'block' : 'none';
+        { const el = getHeatmapEl(); if (el) el.style.display = heatmapVisible ? 'block' : 'none'; }
         break;
-      case 'toggle-analytics':
-        if (currentTab === 'analytics') {
-          sidebar.setActiveTab('monitor');
-        } else {
-          sidebar.setActiveTab('analytics');
-        }
-        break;
-      case 'timeline-live':
-        break;
-      case 'toggle-shortcuts':
-        shortcutsHelp.toggle();
-        break;
+      case 'toggle-shortcuts':   shortcutsHelp.toggle(); break;
       case 'toggle-focus':
         if (focusModeActive) {
-          focusModeActive = false;
-          agentManager.setFocusAgent(null);
+          exitFocusMode();
         } else {
           agentManager.cycleNextAgent();
           focusModeActive = !!agentManager.focusedAgentId;
+          updateFocusIndicator();
+        }
+        break;
+      case 'cycle-focus':
+        if (!focusModeActive) {
+          agentManager.cycleNextAgent();
+          focusModeActive = !!agentManager.focusedAgentId;
+        } else {
+          const next = agentManager.cycleNextAgent();
+          if (!next) exitFocusMode();
         }
         updateFocusIndicator();
         break;
-      case 'session-export':
-        sessionExport.toggle();
-        break;
-      case 'toggle-trails':
-        trails.toggle();
-        break;
-      case 'toggle-daynight':
-        world.dayNight.toggle();
-        break;
-      case 'toggle-minimap':
-        minimap.toggle();
-        break;
-      case 'toggle-leaderboard':
-        if (currentTab === 'leaderboard') {
-          sidebar.setActiveTab('monitor');
-        } else {
-          sidebar.setActiveTab('leaderboard');
-        }
-        break;
-      case 'cycle-theme':
-        themeManager.cycleNext();
-        break;
-      case 'toggle-annotations':
-        zoneAnnotations.toggle();
-        break;
-      case 'toggle-toolchain':
-        if (currentTab === 'toolchain') {
-          sidebar.setActiveTab('monitor');
-        } else {
-          sidebar.setActiveTab('toolchain');
-        }
-        break;
-      case 'toggle-taskgraph':
-        if (currentTab === 'taskgraph') {
-          sidebar.setActiveTab('monitor');
-        } else {
-          sidebar.setActiveTab('taskgraph');
-        }
-        break;
-      case 'toggle-activity':
-        if (currentTab === 'activity') {
-          sidebar.setActiveTab('monitor');
-        } else {
-          sidebar.setActiveTab('activity');
-        }
-        break;
-      case 'toggle-waterfall':
-        if (currentTab === 'waterfall') {
-          sidebar.setActiveTab('monitor');
-        } else {
-          sidebar.setActiveTab('waterfall');
-        }
-        break;
-      case 'toggle-graph':
-        if (currentTab === 'graph') {
-          sidebar.setActiveTab('monitor');
-        } else {
-          sidebar.setActiveTab('graph');
-        }
-        break;
+      case 'exit-focus':         if (focusModeActive) exitFocusMode(); break;
+      case 'session-export':     sessionExport.toggle(); break;
+      case 'toggle-trails':      trails.toggle(); break;
+      case 'toggle-daynight':    world.dayNight.toggle(); break;
+      case 'toggle-minimap':     minimap.toggle(); break;
+      case 'cycle-theme':        themeManager.cycleNext(); break;
+      case 'toggle-annotations': zoneAnnotations.toggle(); break;
+      case 'toggle-sidebar':     sidebar.toggle(); break;
+      case 'toggle-analytics':   toggleTab('analytics'); break;
+      case 'toggle-leaderboard': toggleTab('leaderboard'); break;
+      case 'toggle-toolchain':   toggleTab('toolchain'); break;
+      case 'toggle-taskgraph':   toggleTab('taskgraph'); break;
+      case 'toggle-activity':    toggleTab('activity'); break;
+      case 'toggle-waterfall':   toggleTab('waterfall'); break;
+      case 'toggle-graph':       toggleTab('graph'); break;
+      case 'timeline-live':      break;
     }
-  });
+  }
+
+  // ── Command Palette ──
+  const commandPalette = new CommandPalette(store, executeAction);
 
   commandPalette.setCustomizationLookup(custLookup);
 
@@ -485,113 +425,34 @@ async function main() {
   }, { once: true });
 
   // ── Global keyboard shortcuts ──
+  const KEY_ACTION_MAP: Record<string, string> = {
+    'a': 'toggle-analytics',
+    'h': 'toggle-heatmap',
+    'm': 'toggle-mute',
+    'f': 'cycle-focus',
+    'e': 'session-export',
+    'Escape': 'exit-focus',
+    't': 'toggle-trails',
+    'n': 'toggle-daynight',
+    '`': 'toggle-minimap',
+    'l': 'toggle-leaderboard',
+    'p': 'cycle-theme',
+    'o': 'toggle-annotations',
+    'c': 'toggle-toolchain',
+    'g': 'toggle-taskgraph',
+    'v': 'toggle-activity',
+    'w': 'toggle-waterfall',
+    'r': 'toggle-graph',
+    '[': 'toggle-sidebar',
+  };
+
   document.addEventListener('keydown', (e) => {
     const tag = (e.target as HTMLElement)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
 
-    switch (e.key) {
-      case 'a':
-        if (currentTab === 'analytics') {
-          sidebar.setActiveTab('monitor');
-        } else {
-          sidebar.setActiveTab('analytics');
-        }
-        break;
-      case 'h':
-        heatmapVisible = !heatmapVisible;
-        const heatmapEl = document.getElementById('zone-heatmap');
-        if (heatmapEl) heatmapEl.style.display = heatmapVisible ? 'block' : 'none';
-        break;
-      case 'm':
-        sound.init();
-        sound.muted = !sound.muted;
-        updateMuteIcon();
-        break;
-      case 'f':
-        if (!focusModeActive) {
-          agentManager.cycleNextAgent();
-          focusModeActive = !!agentManager.focusedAgentId;
-        } else {
-          const next = agentManager.cycleNextAgent();
-          if (!next) {
-            focusModeActive = false;
-            agentManager.setFocusAgent(null);
-          }
-        }
-        updateFocusIndicator();
-        break;
-      case 'e':
-        sessionExport.toggle();
-        break;
-      case 'Escape':
-        if (focusModeActive) {
-          focusModeActive = false;
-          agentManager.setFocusAgent(null);
-          updateFocusIndicator();
-        }
-        break;
-      case 't':
-        trails.toggle();
-        break;
-      case 'n':
-        world.dayNight.toggle();
-        break;
-      case '`':
-        minimap.toggle();
-        break;
-      case 'l':
-        if (currentTab === 'leaderboard') {
-          sidebar.setActiveTab('monitor');
-        } else {
-          sidebar.setActiveTab('leaderboard');
-        }
-        break;
-      case 'p':
-        themeManager.cycleNext();
-        break;
-      case 'o':
-        zoneAnnotations.toggle();
-        break;
-      case 'c':
-        if (currentTab === 'toolchain') {
-          sidebar.setActiveTab('monitor');
-        } else {
-          sidebar.setActiveTab('toolchain');
-        }
-        break;
-      case 'g':
-        if (currentTab === 'taskgraph') {
-          sidebar.setActiveTab('monitor');
-        } else {
-          sidebar.setActiveTab('taskgraph');
-        }
-        break;
-      case 'v':
-        if (currentTab === 'activity') {
-          sidebar.setActiveTab('monitor');
-        } else {
-          sidebar.setActiveTab('activity');
-        }
-        break;
-      case 'w':
-        if (currentTab === 'waterfall') {
-          sidebar.setActiveTab('monitor');
-        } else {
-          sidebar.setActiveTab('waterfall');
-        }
-        break;
-      case 'r':
-        if (currentTab === 'graph') {
-          sidebar.setActiveTab('monitor');
-        } else {
-          sidebar.setActiveTab('graph');
-        }
-        break;
-      case '[':
-        sidebar.toggle();
-        break;
-    }
+    const action = KEY_ACTION_MAP[e.key];
+    if (action) executeAction(action);
   });
 
   // Cleanup on page unload — release resources and stop timers
@@ -624,7 +485,6 @@ async function main() {
       heatmap.updateTransform(root.x, root.y, root.scale.x);
     }
 
-    // layoutEditor.updateTransform(root.x, root.y, root.scale.x);
     zoneAnnotations.updateTransform(root.x, root.y, root.scale.x);
 
     if (focusModeActive) {

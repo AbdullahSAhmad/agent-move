@@ -98,7 +98,7 @@ export class JsonlParser {
         if (text.length > 0 && text.length < 200) {
           return {
             type: 'text',
-            text: text.slice(0, 80),
+            text,
             model: msg.message.model,
             sessionId,
           };
