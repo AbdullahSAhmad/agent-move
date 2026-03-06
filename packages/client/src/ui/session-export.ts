@@ -12,6 +12,7 @@ export class SessionExport {
   private el: HTMLElement;
   private store: StateStore;
   private isOpen = false;
+  private _customizationLookup: ((agent: AgentState) => { displayName: string; colorIndex: number }) | null = null;
 
   constructor(store: StateStore) {
     this.store = store;
@@ -40,6 +41,10 @@ export class SessionExport {
     this.el.querySelector('.se-close')!.addEventListener('click', () => this.close());
     this.el.querySelector('.se-copy-btn')!.addEventListener('click', () => this.copyToClipboard());
     this.el.querySelector('.se-download-btn')!.addEventListener('click', () => this.download());
+  }
+
+  setCustomizationLookup(fn: (agent: AgentState) => { displayName: string; colorIndex: number }): void {
+    this._customizationLookup = fn;
   }
 
   toggle(): void {
@@ -87,7 +92,7 @@ export class SessionExport {
 
       const zone = ZONE_MAP.get(a.currentZone);
       agentStats.push({
-        name: a.agentName || a.projectName || a.sessionId.slice(0, 10),
+        name: this._customizationLookup?.(a)?.displayName || a.agentName || a.projectName || a.sessionId.slice(0, 10),
         cost,
         tokens: a.totalInputTokens + a.totalOutputTokens,
         duration: now - a.spawnedAt,

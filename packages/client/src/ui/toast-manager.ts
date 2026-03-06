@@ -19,6 +19,7 @@ const MAX_TOASTS = 5;
 export class ToastManager {
   private containerEl: HTMLElement;
   private store: StateStore;
+  private _customizationLookup: ((agent: AgentState) => { displayName: string; colorIndex: number }) | null = null;
   private toasts: ToastEntry[] = [];
   private onSpawnBound: (agent: AgentState) => void;
   private onIdleBound: (agent: AgentState) => void;
@@ -48,8 +49,13 @@ export class ToastManager {
     this.store.on('task:completed', this.onTaskBound);
   }
 
+  setCustomizationLookup(fn: (agent: AgentState) => { displayName: string; colorIndex: number }): void {
+    this._customizationLookup = fn;
+  }
+
   private getName(agent: AgentState): string {
-    return agent.agentName || agent.projectName || agent.sessionId.slice(0, 10);
+    const custom = this._customizationLookup?.(agent);
+    return custom?.displayName || agent.agentName || agent.projectName || agent.sessionId.slice(0, 10);
   }
 
   private getColor(agent: AgentState): string {
@@ -73,8 +79,9 @@ export class ToastManager {
   }
 
   private onShutdown(agentId: string): void {
-    // Agent already removed from store at this point — use minimal info
-    this.show(`Agent shut down`, 'shutdown');
+    const agent = this.store.getAgent(agentId);
+    const name = agent ? this.getName(agent) : agentId.slice(0, 10);
+    this.show(`<strong>${escapeHtml(name)}</strong> shut down`, 'shutdown');
   }
 
   private onTaskCompleted(taskSubject: string): void {

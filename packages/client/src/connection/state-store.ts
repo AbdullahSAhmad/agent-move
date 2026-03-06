@@ -194,8 +194,8 @@ export class StateStore {
         if (agent) {
           this.pushTimelineEvent('agent:shutdown', agent, msg.timestamp);
         }
-        this.agents.delete(msg.agentId);
         this.emit('agent:shutdown', msg.agentId);
+        this.agents.delete(msg.agentId);
         break;
       }
 

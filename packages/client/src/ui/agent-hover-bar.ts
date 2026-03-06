@@ -105,7 +105,7 @@ export class AgentHoverBar {
 
     // Position above the sprite
     this.el.style.left = `${screenX}px`;
-    this.el.style.top = `${screenY - 40}px`;
+    this.el.style.top = `${screenY - 60}px`;
     this.el.classList.add('visible');
   }
 

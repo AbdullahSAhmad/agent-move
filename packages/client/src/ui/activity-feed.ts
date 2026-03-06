@@ -128,7 +128,11 @@ export class ActivityFeed {
       }
     });
     on('agent:idle', (a: AgentState) => this.add('idle', this.agentHtml(a, 'idle'), this.name(a)));
-    on('agent:shutdown', (id: string) => this.add('shutdown', `Agent <span class="feed-dim">${this.esc(id.slice(0, 10))}</span> shut down`, id));
+    on('agent:shutdown', (id: string) => {
+      const agent = this.store.getAgent(id);
+      const label = agent ? this.name(agent) : id.slice(0, 10);
+      this.add('shutdown', `<span class="feed-name">${this.esc(label)}</span> shut down`, label);
+    });
     on('permission:request', (p: PendingPermission) => this.add('permission', `\u{1F512} Permission request: <strong>${this.esc(p.toolName)}</strong>`, ''));
     on('permission:resolved', ({ permissionId, decision }: { permissionId: string; decision: string }) => this.add('permission', `\u{1F513} Permission ${decision}: <span class="feed-dim">${this.esc(permissionId.slice(0, 8))}</span>`, ''));
     on('anomaly:alert', (a: AnomalyEvent) => this.add('anomaly', `\u26A0\uFE0F ${this.esc(a.agentName)}: ${this.esc(a.message)}`, a.agentName));

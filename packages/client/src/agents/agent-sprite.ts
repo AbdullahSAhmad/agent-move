@@ -51,8 +51,8 @@ export class AgentSprite {
   public readonly container = new Container();
 
   private sprite: Sprite;
+  private nameBg: Graphics;
   private nameLabel: Text;
-  private projectLabel: Text;
 
   // Speech bubble components
   private speechBubble: Container;
@@ -202,45 +202,27 @@ export class AgentSprite {
     this.sprite.anchor.set(0.5, 0.5);
     this.container.addChild(this.sprite);
 
+    // Dark background pill behind name label
+    this.nameBg = new Graphics();
+    this.container.addChild(this.nameBg);
+
     // Name label below sprite
     const rawName = agent.agentName || getFunnyName(agent.sessionId);
     const name = rawName.length > 14 ? rawName.slice(0, 12) + '..' : rawName;
     const labelStyle = new TextStyle({
-      fontSize: 13,
+      fontSize: 11,
       fontFamily: "'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
-      fill: COLORS.text,
+      fill: 0xffffff,
       align: 'center',
-      fontWeight: '600',
-      dropShadow: {
-        alpha: 0.8,
-        blur: 2,
-        color: 0x000000,
-        distance: 1,
-      },
+      fontWeight: '700',
     });
     this.nameLabel = new Text({ text: name, style: labelStyle });
     this.nameLabel.anchor.set(0.5, 0);
-    this.nameLabel.position.set(0, this.spriteHeight / 2 + 6);
+    this.nameLabel.position.set(0, this.spriteHeight / 2 + 8);
     this.container.addChild(this.nameLabel);
 
-    // Project label below name
-    const projectLabelStyle = new TextStyle({
-      fontSize: 7,
-      fontFamily: "'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
-      fill: COLORS.textDim,
-      align: 'center',
-      dropShadow: {
-        alpha: 0.6,
-        blur: 1,
-        color: 0x000000,
-        distance: 1,
-      },
-    });
-    this.projectLabel = new Text({ text: '', style: projectLabelStyle });
-    this.projectLabel.anchor.set(0.5, 0);
-    this.projectLabel.position.set(0, this.spriteHeight / 2 + 22);
-    this.projectLabel.visible = false;
-    this.container.addChild(this.projectLabel);
+    // Draw initial name background
+    this.updateNameBg();
 
     // Speech bubble with background
     this.speechBubble = new Container();
@@ -440,24 +422,35 @@ export class AgentSprite {
     const name = rawName.length > 14 ? rawName.slice(0, 12) + '..' : rawName;
     if (this.nameLabel.text !== name) {
       this.nameLabel.text = name;
+      this.updateNameBg();
     }
   }
 
-  /** Set the project name label below the agent name */
-  setProjectName(name: string): void {
-    if (name) {
-      const display = name.length > 18 ? name.slice(0, 16) + '..' : name;
-      this.projectLabel.text = display;
-      this.projectLabel.visible = true;
-    } else {
-      this.projectLabel.visible = false;
-    }
+  /** @deprecated Project label removed — sprite variant conveys project identity */
+  setProjectName(_name: string): void {
+    // no-op
   }
 
   /** Override the displayed name with a custom one */
   setCustomName(name: string): void {
     const display = name.length > 14 ? name.slice(0, 12) + '..' : name;
     this.nameLabel.text = display;
+    this.updateNameBg();
+  }
+
+  /** Redraw the dark pill behind the name + project labels */
+  private updateNameBg(): void {
+    this.nameBg.clear();
+    const padX = 6;
+    const padY = 3;
+    const nameW = this.nameLabel.width;
+    const nameH = this.nameLabel.height;
+    const w = nameW + padX * 2;
+    const h = nameH + padY * 2;
+    const bgY = this.spriteHeight / 2 + 8 - padY;
+    this.nameBg
+      .roundRect(-w / 2, bgY, w, h, 4)
+      .fill({ color: 0x000000, alpha: 0.55 });
   }
 
   /** Rebuild all sprite textures with a new palette (for color customization) */
@@ -715,8 +708,8 @@ export class AgentSprite {
       this.compactBadgeText.anchor.set(0.5, 0.5);
       this.compactBadge.addChild(this.compactBadgeText);
 
-      // Position below the project label to avoid overlapping speech bubble / other badges
-      this.compactBadge.position.set(0, this.spriteHeight / 2 + 36);
+      // Position below the name label
+      this.compactBadge.position.set(0, this.spriteHeight / 2 + 28);
       this.container.addChild(this.compactBadge);
     }
 

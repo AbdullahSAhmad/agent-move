@@ -1,4 +1,4 @@
-import type { AgentState, TimelineEvent, ZoneId } from '@agent-move/shared';
+import type { AgentState, TimelineEvent } from '@agent-move/shared';
 import { AGENT_PALETTES } from '@agent-move/shared';
 import type { StateStore } from '../connection/state-store.js';
 
@@ -54,6 +54,8 @@ export class Timeline {
   private agentFilterContainer: HTMLElement;
   private swimLabelsEl: HTMLElement;
   private trackWrapper: HTMLElement;
+
+  private _customizationLookup: ((agent: AgentState) => { displayName: string; colorIndex: number }) | null = null;
 
   // Bound event handlers (stored for cleanup)
   private resizeHandler = () => this.resizeCanvas();
@@ -192,6 +194,10 @@ export class Timeline {
     }, 1000);
   }
 
+  setCustomizationLookup(fn: (agent: AgentState) => { displayName: string; colorIndex: number }): void {
+    this._customizationLookup = fn;
+  }
+
   setReplayCallback(cb: (agents: Map<string, AgentState>) => void): void {
     this.onReplayState = cb;
   }
@@ -285,10 +291,11 @@ export class Timeline {
     const seen = new Map<string, { id: string; name: string; colorIndex: number }>();
     for (const e of events) {
       if (!seen.has(e.agent.id)) {
+        const custom = this._customizationLookup?.(e.agent);
         seen.set(e.agent.id, {
           id: e.agent.id,
-          name: e.agent.agentName || e.agent.projectName || e.agent.id.slice(0, 8),
-          colorIndex: e.agent.colorIndex,
+          name: custom?.displayName || e.agent.agentName || e.agent.projectName || e.agent.id.slice(0, 8),
+          colorIndex: custom?.colorIndex ?? e.agent.colorIndex,
         });
       }
     }

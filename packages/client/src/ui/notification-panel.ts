@@ -23,6 +23,7 @@ let notifCounter = 0;
 export class NotificationPanel {
   private container: HTMLElement;
   private store: StateStore;
+  private _customizationLookup: ((agent: AgentState) => { displayName: string; colorIndex: number }) | null = null;
   private notifications: Notification[] = [];
   private visible = false;
   private badgeEl: HTMLElement;
@@ -30,7 +31,7 @@ export class NotificationPanel {
   private onAnomalyBound: (anomaly: AnomalyEvent) => void;
   private onTaskBound: (data: { taskSubject: string }) => void;
   private onSpawnBound: (agent: AgentState) => void;
-  private onShutdownBound: () => void;
+  private onShutdownBound: (agentId: string) => void;
 
   constructor(store: StateStore) {
     this.store = store;
@@ -52,12 +53,23 @@ export class NotificationPanel {
     this.onAnomalyBound = (anomaly) => this.addAnomaly(anomaly);
     this.onTaskBound = ({ taskSubject }) => this.addTask(taskSubject);
     this.onSpawnBound = (agent) => this.addLifecycle(agent, 'spawned');
-    this.onShutdownBound = () => this.addLifecycleSimple('Agent shut down');
+    this.onShutdownBound = (agentId: string) => {
+      const agent = store.getAgent(agentId);
+      if (agent) {
+        this.addLifecycle(agent, 'shut down');
+      } else {
+        this.addLifecycleSimple(`${agentId.slice(0, 10)} shut down`);
+      }
+    };
     store.on('permission:request', this.onPermRequestBound);
     store.on('anomaly:alert', this.onAnomalyBound);
     store.on('task:completed', this.onTaskBound);
     store.on('agent:spawn', this.onSpawnBound);
     store.on('agent:shutdown', this.onShutdownBound);
+  }
+
+  setCustomizationLookup(fn: (agent: AgentState) => { displayName: string; colorIndex: number }): void {
+    this._customizationLookup = fn;
   }
 
   getBadgeElement(): HTMLElement {
@@ -96,7 +108,8 @@ export class NotificationPanel {
   }
 
   private addLifecycle(agent: AgentState, action: string): void {
-    const name = agent.agentName || agent.projectName || agent.sessionId.slice(0, 10);
+    const custom = this._customizationLookup?.(agent);
+    const name = custom?.displayName || agent.agentName || agent.projectName || agent.sessionId.slice(0, 10);
     this.push({
       kind: 'lifecycle',
       priority: 'low',
