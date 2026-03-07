@@ -8,7 +8,10 @@ interface Notification {
   id: string;
   kind: NotifKind;
   priority: NotifPriority;
+  /** Message body. If agentId is set, the resolved agent name is prepended at render time. */
   message: string;
+  /** If set, name is looked up live from the store and prepended to message each render. */
+  agentId?: string;
   detail?: string;
   timestamp: number;
 }
@@ -52,14 +55,15 @@ export class NotificationPanel {
     this.onPermRequestBound = (perm) => this.addPermission(perm);
     this.onAnomalyBound = (anomaly) => this.addAnomaly(anomaly);
     this.onTaskBound = ({ taskSubject }) => this.addTask(taskSubject);
-    this.onSpawnBound = (agent) => this.addLifecycle(agent, 'spawned');
+    this.onSpawnBound = (agent) => this.push({ kind: 'lifecycle', priority: 'low', agentId: agent.id, message: ' spawned' });
     this.onShutdownBound = (agentId: string) => {
+      // Agent is removed from store before this fires, so we can't look it up live.
+      // Use whatever name the store still has, or fall back to id slice.
       const agent = store.getAgent(agentId);
-      if (agent) {
-        this.addLifecycle(agent, 'shut down');
-      } else {
-        this.addLifecycleSimple(`${agentId.slice(0, 10)} shut down`);
-      }
+      const name = agent
+        ? (this._customizationLookup?.(agent)?.displayName || agent.agentName || agent.projectName || agent.sessionId.slice(0, 10))
+        : agentId.slice(0, 10);
+      this.push({ kind: 'lifecycle', priority: 'low', message: `${name} shut down` });
     };
     store.on('permission:request', this.onPermRequestBound);
     store.on('anomaly:alert', this.onAnomalyBound);
@@ -95,7 +99,8 @@ export class NotificationPanel {
     this.push({
       kind: 'anomaly',
       priority: anomaly.severity === 'critical' ? 'urgent' : 'high',
-      message: `${anomaly.agentName}: ${anomaly.message}`,
+      agentId: anomaly.agentId,
+      message: `: ${anomaly.message}`,
     });
   }
 
@@ -107,18 +112,10 @@ export class NotificationPanel {
     });
   }
 
-  private addLifecycle(agent: AgentState, action: string): void {
-    const custom = this._customizationLookup?.(agent);
-    const name = custom?.displayName || agent.agentName || agent.projectName || agent.sessionId.slice(0, 10);
-    this.push({
-      kind: 'lifecycle',
-      priority: 'low',
-      message: `${name} ${action}`,
-    });
-  }
-
-  private addLifecycleSimple(msg: string): void {
-    this.push({ kind: 'lifecycle', priority: 'low', message: msg });
+  private resolveName(agentId: string): string {
+    const agent = this.store.getAgent(agentId);
+    if (!agent) return agentId.slice(0, 10);
+    return this._customizationLookup?.(agent)?.displayName || agent.agentName || agent.projectName || agent.sessionId.slice(0, 10);
   }
 
   private push(partial: Omit<Notification, 'id' | 'timestamp'>): void {
@@ -154,9 +151,11 @@ export class NotificationPanel {
 
     for (const n of this.notifications) {
       const age = this.formatAge(n.timestamp);
+      // Resolve agent name live from the store if agentId is present
+      const displayMsg = n.agentId ? this.resolveName(n.agentId) + n.message : n.message;
       html += `<div class="notif-item notif-${this.esc(n.priority)} notif-${this.esc(n.kind)}">`;
       html += `<span class="notif-icon">${this.icon(n.kind)}</span>`;
-      html += `<span class="notif-msg">${this.esc(n.message)}</span>`;
+      html += `<span class="notif-msg">${this.esc(displayMsg)}</span>`;
       if (n.detail) {
         html += `<span class="notif-detail">${this.esc(n.detail)}</span>`;
       }

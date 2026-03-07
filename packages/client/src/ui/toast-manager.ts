@@ -97,8 +97,10 @@ export class ToastManager {
   private onAnomaly(anomaly: AnomalyEvent): void {
     const icon = ToastManager.ANOMALY_ICONS[anomaly.kind] ?? '\u26A0\uFE0F';
     const type = anomaly.severity === 'critical' ? 'critical' : 'warning';
+    const liveAgent = this.store.getAgent(anomaly.agentId);
+    const name = liveAgent ? this.getName(liveAgent) : anomaly.agentName;
     this.show(
-      `${icon} <strong>${escapeHtml(anomaly.agentName)}</strong>: ${escapeHtml(anomaly.message)}`,
+      `${icon} <strong>${escapeHtml(name)}</strong>: ${escapeHtml(anomaly.message)}`,
       type
     );
   }
