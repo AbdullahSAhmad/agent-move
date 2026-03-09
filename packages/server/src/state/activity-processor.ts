@@ -14,6 +14,8 @@ export const LONG_RUNNING_TOOLS = new Set([
   'WebSearch',
   // Tools that block waiting for user input
   'AskUserQuestion',
+  // Reasoning / extended thinking pseudo-tool (emitted for OpenCode reasoning parts)
+  'thinking',
   // Browser/playwright tools that wait for navigation or network
   'mcp__playwright__browser_navigate',
   'mcp__playwright__browser_wait_for',
